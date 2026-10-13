@@ -1,0 +1,5 @@
+steps:
+  - script: |
+      curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+      databricks --version
+    displayName: Install Databricks CLI

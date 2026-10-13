@@ -1,0 +1,49 @@
+# Databricks Automation Bundle (formerly Asset Bundles)
+# Docs: https://docs.databricks.com/dev-tools/bundles/
+bundle:
+  name: river_nav_lakehouse
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for this environment
+    default: river_nav_dev
+  schema_prefix:
+    description: Prefix for bronze/silver/gold schemas
+    default: nav
+  raw_volume:
+    description: Volume path where the collector lands raw files
+    default: /Volumes/river_nav_dev/nav_raw/landing
+  collector_pause:
+    description: PAUSED or UNPAUSED for the collector schedule
+    default: PAUSED
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-REPLACE_ME.azuredatabricks.net
+
+  test:
+    workspace:
+      host: https://adb-REPLACE_ME.azuredatabricks.net
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: river_nav_test
+      raw_volume: /Volumes/river_nav_test/nav_raw/landing
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-REPLACE_ME.azuredatabricks.net
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: river_nav
+      raw_volume: /Volumes/river_nav/nav_raw/landing
+      collector_pause: UNPAUSED
+    run_as:
+      # Use a service principal for prod, never a personal account
+      service_principal_name: REPLACE_WITH_SP_APPLICATION_ID

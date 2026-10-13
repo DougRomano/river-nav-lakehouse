@@ -1,0 +1,23 @@
+# Lakeflow Spark Declarative Pipeline (formerly Delta Live Tables)
+resources:
+  pipelines:
+    river_nav_pipeline:
+      name: river_nav_pipeline_${bundle.target}
+      catalog: ${var.catalog}
+      schema: ${var.schema_prefix}   # one schema; layers are table prefixes (bronze_, silver_, dim_/fact_)
+      serverless: true
+      channel: CURRENT
+      photon: true
+      # Puts src/ on sys.path so `import river_nav` works in pipeline code. VERIFY on first deploy.
+      root_path: ../src
+      libraries:
+        - file:
+            path: ../src/pipelines/bronze.py
+        - file:
+            path: ../src/pipelines/silver.py
+        - file:
+            path: ../src/pipelines/gold.py
+      configuration:
+        river_nav.raw_volume: ${var.raw_volume}
+        river_nav.catalog: ${var.catalog}
+        river_nav.schema_prefix: ${var.schema_prefix}

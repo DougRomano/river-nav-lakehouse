@@ -1,0 +1,92 @@
+# Azure DevOps: test → validate → deploy dev → test → prod (prod gated by environment approval)
+#
+# Setup:
+#   1. Variable group `river-nav-databricks` with DATABRICKS_HOST, ARM_TENANT_ID,
+#      ARM_CLIENT_ID, ARM_CLIENT_SECRET (secret) for a service principal per environment,
+#      or use workload identity federation via an Azure service connection.
+#   2. Environments `river-nav-test` and `river-nav-prod` with approvals on prod.
+
+trigger:
+  branches:
+    include: [main]
+pr:
+  branches:
+    include: [main]
+
+variables:
+  - group: river-nav-databricks
+  - name: pythonVersion
+    value: "3.12"
+
+stages:
+  - stage: Test
+    jobs:
+      - job: unit
+        pool: { vmImage: ubuntu-latest }
+        steps:
+          - task: UsePythonVersion@0
+            inputs: { versionSpec: $(pythonVersion) }
+          - script: |
+              pip install -e ".[dev]"
+              ruff check src tests
+              pytest --junitxml=test-results.xml
+            displayName: Lint and unit tests
+          - task: PublishTestResults@2
+            condition: always()
+            inputs: { testResultsFiles: test-results.xml }
+
+  - stage: Validate
+    dependsOn: Test
+    jobs:
+      - job: bundle
+        pool: { vmImage: ubuntu-latest }
+        steps:
+          - template: templates/databricks-cli.yml
+          - script: databricks bundle validate -t dev
+            displayName: Validate bundle
+            env:
+              DATABRICKS_HOST: $(DATABRICKS_HOST)
+              ARM_TENANT_ID: $(ARM_TENANT_ID)
+              ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+              ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+
+  - stage: DeployTest
+    dependsOn: Validate
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: deploy_test
+        environment: river-nav-test
+        pool: { vmImage: ubuntu-latest }
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/databricks-cli.yml
+                - script: databricks bundle deploy -t test
+                  displayName: Deploy bundle to test
+                  env:
+                    DATABRICKS_HOST: $(DATABRICKS_HOST)
+                    ARM_TENANT_ID: $(ARM_TENANT_ID)
+                    ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                    ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+
+  - stage: DeployProd
+    dependsOn: DeployTest
+    jobs:
+      - deployment: deploy_prod
+        environment: river-nav-prod   # add a manual approval check on this environment
+        pool: { vmImage: ubuntu-latest }
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - template: templates/databricks-cli.yml
+                - script: databricks bundle deploy -t prod
+                  displayName: Deploy bundle to prod
+                  env:
+                    DATABRICKS_HOST: $(DATABRICKS_HOST)
+                    ARM_TENANT_ID: $(ARM_TENANT_ID)
+                    ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                    ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)

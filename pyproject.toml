@@ -1,0 +1,43 @@
+[project]
+name = "river-nav"
+version = "0.1.0"
+description = "River navigation lakehouse: Databricks + Fabric + Foundry learning capstone"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+spark = [
+    "pyspark>=4.0",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["river_nav*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DTZ"]
+
+[tool.ruff.lint.per-file-ignores]
+# spark, dbutils and display are injected by the Databricks runtime
+"src/notebooks/*" = ["F821", "E402", "I001"]
+"src/pipelines/*" = ["F821"]
+# tests deliberately build naive datetimes to check UTC handling
+"tests/*" = ["DTZ001"]

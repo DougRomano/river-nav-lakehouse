@@ -1,0 +1,40 @@
+# Lakeflow Jobs (formerly Workflows)
+resources:
+  jobs:
+    collect_snapshots:
+      name: river_nav_collect_${bundle.target}
+      description: Land raw USGS gauge readings and Corps Locks snapshots in the raw Volume
+      schedule:
+        # Every 30 minutes, matching the Corps Locks refresh cadence
+        quartz_cron_expression: "0 0/30 * * * ?"
+        timezone_id: America/Chicago
+        pause_status: ${var.collector_pause}
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: collect
+          notebook_task:
+            notebook_path: ../src/notebooks/01_collect_snapshots.py
+            base_parameters:
+              raw_volume: ${var.raw_volume}
+          environment_key: default
+          max_retries: 2
+          min_retry_interval_millis: 120000
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - requests>=2.32
+
+    refresh_lakehouse:
+      name: river_nav_refresh_${bundle.target}
+      description: Refresh bronze → silver → gold after collection
+      schedule:
+        quartz_cron_expression: "0 15 * * * ?"
+        timezone_id: America/Chicago
+        pause_status: ${var.collector_pause}
+      tasks:
+        - task_key: run_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.river_nav_pipeline.id}
+            full_refresh: false
