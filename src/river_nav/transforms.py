@@ -11,6 +11,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 
+import pandas as pd
+
 USGS_NO_DATA_SENTINELS = {-999999.0, -999999}
 
 
@@ -174,6 +176,63 @@ def interpolate_at(
         found.append((t, left.value + fraction * (right.value - left.value)))
     return found
 
+def interpolate_frame(
+    readings: pd.DataFrame, grid: list[datetime], by: str
+) -> pd.DataFrame:
+    """Value at each grid time, within each `by` group.
+
+    Backward as-of is the bisect_right lookup: last row with observed_at_utc
+    <= grid_time. Forward as-of, with exact matches off, is the first strictly
+    later row. A grid time with no backward match is dropped. An exact grid
+    time, or one with no forward match, keeps the backward value. A time
+    between two readings is left + fraction * (right - left).
+    """
+    groups = readings[[by]].drop_duplicates()
+    grid_frame = groups.merge(
+        pd.DataFrame({"grid_time": pd.to_datetime(list(grid), utc=True)}), how="cross"
+    ).sort_values("grid_time", kind="mergesort")
+    ordered = readings.copy()
+    ordered["observed_at_utc"] = pd.to_datetime(ordered["observed_at_utc"], utc=True)
+    # merge_asof requires the on-key itself to be monotonic. Sorting by gauge
+    # first makes time go backwards at each gauge boundary. by= still partitions
+    # the match. A stable time sort keeps equal timestamps in input order, so
+    # backward as-of takes the last duplicate in that gauge and forward as-of
+    # takes the first strictly later row in that gauge (ordered[i + 1]).
+    ordered = ordered.sort_values("observed_at_utc", kind="mergesort")
+
+    left = pd.merge_asof(
+        grid_frame,
+        ordered.rename(columns={"observed_at_utc": "left_time", "value": "left_value"}),
+        left_on="grid_time",
+        right_on="left_time",
+        by=by,
+        direction="backward",
+    )
+    right = pd.merge_asof(
+        grid_frame,
+        ordered.rename(columns={"observed_at_utc": "right_time", "value": "right_value"}),
+        left_on="grid_time",
+        right_on="right_time",
+        by=by,
+        direction="forward",
+        allow_exact_matches=False,
+    )
+    matched = left.merge(right, on=[by, "grid_time"], how="left")
+    # bisect_right - 1 < 0: no reading at or before this grid time.
+    matched = matched.dropna(subset=["left_time"])
+    exact = matched["left_time"].eq(matched["grid_time"])
+    # i + 1 >= len(ordered): nothing strictly after this grid time.
+    no_right = matched["right_time"].isna()
+    span_s = (matched["right_time"] - matched["left_time"]).dt.total_seconds()
+    fraction = (matched["grid_time"] - matched["left_time"]).dt.total_seconds() / span_s
+    # A null on either side stays null. NaN propagates, so no is-None guard.
+    # interpolate_at needs the guard because 8.0 - None raises TypeError.
+    blended = matched["left_value"] + fraction * (
+        matched["right_value"] - matched["left_value"]
+    )
+    matched["value"] = blended.where(~exact & ~no_right, matched["left_value"])
+    return matched[[by, "grid_time", "value"]].reset_index(drop=True)
+
 def floor_15(ts: datetime) -> datetime:
     """Floor to the nearest 15-minute mark."""
     return ts.replace(second=0, microsecond=0, minute=ts.minute // 15 * 15)
@@ -184,6 +243,23 @@ def ceil_15(ts: datetime) -> datetime:
     if floored == ts:
         return ts
     return floored + timedelta(minutes=15)
+
+def fifteen_minute_grid(start: datetime, end: datetime) -> list[datetime]:
+    """15-minute marks from ceil(start) through floor(end), inclusive.
+
+    A mark before start would be dropped for the gauge that begins latest.
+    A mark after end would sit past the gauge that ends earliest.
+    """
+    first = ceil_15(start)
+    last = floor_15(end)
+    if first > last:
+        return []
+    marks: list[datetime] = []
+    current = first
+    while current <= last:
+        marks.append(current)
+        current += timedelta(minutes=15)
+    return marks
 
 def interpolate_angle(start_deg: float, end_deg: float, fraction: float) -> float:
     """Shortest-arc blend, in degrees. Result is in [0, 360)."""

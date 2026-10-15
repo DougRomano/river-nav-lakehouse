@@ -40,6 +40,14 @@ WATERWAY_LOCKS_URL = (
 )
 """USACE Waterway Locks via BTS geodata (ArcGIS FeatureServer). 234 chamber rows nationally."""
 
+WATERWAY_LOCKS_CSV_URL = (
+    "https://geodata.bts.gov/api/download/v1/items/9710c88bd343497eb72b884caf7aa872/csv?layers=0"
+)
+"""Same layer as a CSV export, via the BTS Hub download API. This is what the Download button
+on https://geodata.bts.gov/datasets/usdot::waterway-locks/about fetches. Verified 2026-10-15:
+234 rows, UTF-8 with BOM, redirects to a short-lived signed CDN URL. The FeatureServer itself
+only serves JSON, geoJSON and PBF, and bronze_lock_characteristics reads CSV."""
+
 # St. Louis-area locks as (RIVERCD, LOCKCD) from Waterway Locks, verified 2026-10-13.
 # Match on codes, not names: the source spells them "CHAINS OF ROCKS L/D 27", "LOCK & DAM 25".
 TARGET_LOCKS: dict[tuple[str, str], str] = {

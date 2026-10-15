@@ -4,7 +4,7 @@
 # MAGIC Lands raw API responses in the landing Volume, exactly as received.
 # MAGIC Bronze ingests these files with Auto Loader. Nothing is parsed here.
 # MAGIC
-# MAGIC Layout: `<raw_volume>/<source>/ingest_date=YYYY-MM-DD/<source>_<utc-timestamp>[_<n>].json`
+# MAGIC Layout: `<raw_volume>/<source>/ingest_date=YYYY-MM-DD/<name>_<utc-timestamp>[_<n>].<ext>`
 
 # COMMAND ----------
 
@@ -16,7 +16,6 @@ lookback_hours = int(dbutils.widgets.get("lookback_hours"))
 
 # COMMAND ----------
 
-import json
 import os
 import sys
 from datetime import datetime, timedelta, UTC
@@ -26,23 +25,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 
 import requests
 
-from river_nav.config import GAUGES, corps_locks_sources
+from river_nav.collect import collect_usgs, collect_waterway_locks, land
+from river_nav.config import corps_locks_sources
 from river_nav.corps_locks_client import polite_get
-from river_nav.usgs_client import continuous_url, fetch_pages
 
 run_at = datetime.now(UTC)
-stamp = run_at.strftime("%Y%m%dT%H%M%SZ")
-partition = f"ingest_date={run_at:%Y-%m-%d}"
-
-
-def land(source: str, payload: str | bytes, suffix: str = "", ext: str = "json") -> str:
-    folder = f"{raw_volume}/{source}/{partition}"
-    os.makedirs(folder, exist_ok=True)
-    path = f"{folder}/{source}_{stamp}{suffix}.{ext}"
-    mode = "wb" if isinstance(payload, bytes) else "w"
-    with open(path, mode) as f:
-        f.write(payload)
-    return path
 
 
 # COMMAND ----------
@@ -53,19 +40,8 @@ def land(source: str, payload: str | bytes, suffix: str = "", ext: str = "json")
 
 session = requests.Session()
 start = run_at - timedelta(hours=lookback_hours)
-landed = 0
-
-for gauge in GAUGES:
-    for code in gauge.parameter_codes:
-        url = continuous_url(gauge.monitoring_location_id, code, start, run_at)
-        for i, page in enumerate(fetch_pages(url, session)):
-            page["_collector"] = {"source_url": url, "collected_at_utc": run_at.isoformat()}
-            land("usgs_continuous",
-                 json.dumps(page),
-                 suffix=f"_{gauge.monitoring_location_id}_{code}_{i}")
-            landed += 1
-
-print(f"USGS: landed {landed} pages")
+pulls = collect_usgs(raw_volume, session, start, run_at, run_at)
+print(f"USGS: landed {sum(pull.pages for pull in pulls)} pages")
 
 # COMMAND ----------
 
@@ -77,5 +53,16 @@ print(f"USGS: landed {landed} pages")
 
 for name, url in corps_locks_sources(run_at.date()):
     body = polite_get(session, url)  # 5 requests/min limit; ~4 min per run
-    land(f"corps_locks_{name}", body, ext="json")
+    land(raw_volume, f"corps_locks_{name}", body, run_at)
     print(f"Corps Locks: landed {name} ({len(body):,} bytes)")
+
+# COMMAND ----------
+
+# MAGIC %md ## Waterway Locks reference (lock characteristics)
+# MAGIC Rarely changes, so a full CSV snapshot per run is cheap (~67 KB) and gives the
+# MAGIC silver SCD2 flow a new version to compare against. Landed as received, BOM included.
+
+# COMMAND ----------
+
+path = collect_waterway_locks(raw_volume, session, run_at)
+print(f"Waterway Locks: landed {path.name}")

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "River navigation lakehouse: Databricks + Fabric + Foundry learning capstone"
 requires-python = ">=3.11"
 dependencies = [
+    "pandas>=2.2",
     "requests>=2.32",
 ]
 
