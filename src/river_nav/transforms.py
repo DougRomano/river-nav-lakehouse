@@ -183,8 +183,9 @@ def interpolate_frame(
 
     Backward as-of is the bisect_right lookup: last row with observed_at_utc
     <= grid_time. Forward as-of, with exact matches off, is the first strictly
-    later row. An exact grid time keeps the backward value. A time between two
-    readings is left + fraction * (right - left).
+    later row. A grid time with no backward match is dropped. An exact grid
+    time keeps the backward value. A time between two readings is
+    left + fraction * (right - left).
     """
     groups = readings[[by]].drop_duplicates()
     grid_frame = groups.merge(
@@ -212,6 +213,8 @@ def interpolate_frame(
         allow_exact_matches=False,
     )
     matched = left.merge(right, on=[by, "grid_time"], how="left")
+    # bisect_right - 1 < 0: no reading at or before this grid time.
+    matched = matched.dropna(subset=["left_time"])
     exact = matched["left_time"].eq(matched["grid_time"])
     span_s = (matched["right_time"] - matched["left_time"]).dt.total_seconds()
     fraction = (matched["grid_time"] - matched["left_time"]).dt.total_seconds() / span_s

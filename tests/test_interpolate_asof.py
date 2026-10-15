@@ -54,3 +54,8 @@ def test_exact_grid_point_matches_interpolate_at():
 def test_halfway_point_matches_interpolate_at():
     readings = [Reading(_ts(10, 0), 4.0), Reading(_ts(10, 30), 8.0)]
     _assert_matches(readings, [_ts(10, 15)])
+
+
+def test_point_before_first_reading_is_skipped():
+    readings = [Reading(_ts(10, 15), 4.0)]
+    _assert_matches(readings, [_ts(10, 0), _ts(10, 15)])
