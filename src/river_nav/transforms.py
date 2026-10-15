@@ -179,10 +179,12 @@ def interpolate_at(
 def interpolate_frame(
     readings: pd.DataFrame, grid: list[datetime], by: str
 ) -> pd.DataFrame:
-    """Last reading at or before each grid time, within each `by` group.
+    """Value at each grid time, within each `by` group.
 
-    `direction="backward"` is the bisect_right lookup: last row with
-    observed_at_utc <= grid_time. An exact grid time returns that reading.
+    Backward as-of is the bisect_right lookup: last row with observed_at_utc
+    <= grid_time. Forward as-of, with exact matches off, is the first strictly
+    later row. An exact grid time keeps the backward value. A time between two
+    readings is left + fraction * (right - left).
     """
     groups = readings[[by]].drop_duplicates()
     grid_frame = groups.merge(
@@ -191,14 +193,32 @@ def interpolate_frame(
     ordered = readings.copy()
     ordered["observed_at_utc"] = pd.to_datetime(ordered["observed_at_utc"], utc=True)
     ordered = ordered.sort_values([by, "observed_at_utc"], kind="mergesort")
-    matched = pd.merge_asof(
+
+    left = pd.merge_asof(
         grid_frame,
-        ordered,
+        ordered.rename(columns={"observed_at_utc": "left_time", "value": "left_value"}),
         left_on="grid_time",
-        right_on="observed_at_utc",
+        right_on="left_time",
         by=by,
         direction="backward",
     )
+    right = pd.merge_asof(
+        grid_frame,
+        ordered.rename(columns={"observed_at_utc": "right_time", "value": "right_value"}),
+        left_on="grid_time",
+        right_on="right_time",
+        by=by,
+        direction="forward",
+        allow_exact_matches=False,
+    )
+    matched = left.merge(right, on=[by, "grid_time"], how="left")
+    exact = matched["left_time"].eq(matched["grid_time"])
+    span_s = (matched["right_time"] - matched["left_time"]).dt.total_seconds()
+    fraction = (matched["grid_time"] - matched["left_time"]).dt.total_seconds() / span_s
+    blended = matched["left_value"] + fraction * (
+        matched["right_value"] - matched["left_value"]
+    )
+    matched["value"] = blended.where(~exact, matched["left_value"])
     return matched[[by, "grid_time", "value"]].reset_index(drop=True)
 
 def floor_15(ts: datetime) -> datetime:

@@ -49,3 +49,8 @@ def _assert_matches(readings: list[Reading], grid: list[datetime], gauge: str = 
 def test_exact_grid_point_matches_interpolate_at():
     readings = [Reading(_ts(10, 0), 4.0)]
     _assert_matches(readings, [_ts(10, 0)])
+
+
+def test_halfway_point_matches_interpolate_at():
+    readings = [Reading(_ts(10, 0), 4.0), Reading(_ts(10, 30), 8.0)]
+    _assert_matches(readings, [_ts(10, 15)])
