@@ -94,3 +94,28 @@ def test_missing_value_on_either_side_yields_none():
     _assert_matches(left_missing, [_ts(10, 15)])
     _assert_matches(right_missing, [_ts(10, 15)])
     _assert_matches(exact_missing, [_ts(10, 0)])
+
+
+def test_by_keeps_each_gauge_on_its_own_series():
+    # Same timestamps, different values. One interpolate_frame call has to
+    # match interpolate_at run on each gauge alone.
+    series = {
+        "g1": [Reading(_ts(10, 0), 4.0), Reading(_ts(10, 30), 8.0)],
+        "g2": [Reading(_ts(10, 0), 10.0), Reading(_ts(10, 30), 20.0)],
+    }
+    frame = pd.concat(
+        [_frame(readings, gauge) for gauge, readings in series.items()],
+        ignore_index=True,
+    )
+    grid = [_ts(10, 15)]
+    got = interpolate_frame(frame, grid, by="gauge_id")
+
+    assert list(got["gauge_id"]) == ["g1", "g2"]
+    for gauge, readings in series.items():
+        part = got.loc[got["gauge_id"] == gauge].reset_index(drop=True)
+        found = _as_tuples(part)
+        want = interpolate_at(readings, grid)
+        assert len(found) == len(want)
+        for (got_t, got_v), (want_t, want_v) in zip(found, want, strict=True):
+            assert got_t == want_t
+            assert got_v == pytest.approx(want_v)

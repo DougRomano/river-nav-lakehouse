@@ -190,13 +190,15 @@ def interpolate_frame(
     groups = readings[[by]].drop_duplicates()
     grid_frame = groups.merge(
         pd.DataFrame({"grid_time": pd.to_datetime(list(grid), utc=True)}), how="cross"
-    ).sort_values([by, "grid_time"], kind="mergesort")
+    ).sort_values("grid_time", kind="mergesort")
     ordered = readings.copy()
     ordered["observed_at_utc"] = pd.to_datetime(ordered["observed_at_utc"], utc=True)
-    # Stable sort keeps equal timestamps in input order. Backward as-of then
-    # takes the last duplicate (bisect_right). Forward as-of takes the first
-    # row strictly later, ordered[i + 1], which is the first of the next timestamp.
-    ordered = ordered.sort_values([by, "observed_at_utc"], kind="mergesort")
+    # merge_asof requires the on-key itself to be monotonic. Sorting by gauge
+    # first makes time go backwards at each gauge boundary. by= still partitions
+    # the match. A stable time sort keeps equal timestamps in input order, so
+    # backward as-of takes the last duplicate in that gauge and forward as-of
+    # takes the first strictly later row in that gauge (ordered[i + 1]).
+    ordered = ordered.sort_values("observed_at_utc", kind="mergesort")
 
     left = pd.merge_asof(
         grid_frame,
