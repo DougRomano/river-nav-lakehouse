@@ -59,3 +59,8 @@ def test_halfway_point_matches_interpolate_at():
 def test_point_before_first_reading_is_skipped():
     readings = [Reading(_ts(10, 15), 4.0)]
     _assert_matches(readings, [_ts(10, 0), _ts(10, 15)])
+
+
+def test_point_after_last_reading_carries_forward():
+    readings = [Reading(_ts(10, 0), 4.0)]
+    _assert_matches(readings, [_ts(10, 0), _ts(10, 30)])
