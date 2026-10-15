@@ -84,3 +84,13 @@ def test_right_neighbor_is_the_first_duplicate():
         Reading(_ts(10, 0), 6.0),
     ]
     _assert_matches(readings, [_ts(9, 30)])
+
+
+def test_missing_value_on_either_side_yields_none():
+    left_missing = [Reading(_ts(10, 0), None), Reading(_ts(10, 30), 8.0)]
+    right_missing = [Reading(_ts(10, 0), 4.0), Reading(_ts(10, 30), None)]
+    exact_missing = [Reading(_ts(10, 0), None)]
+
+    _assert_matches(left_missing, [_ts(10, 15)])
+    _assert_matches(right_missing, [_ts(10, 15)])
+    _assert_matches(exact_missing, [_ts(10, 0)])

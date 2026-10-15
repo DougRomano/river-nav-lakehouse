@@ -223,6 +223,8 @@ def interpolate_frame(
     no_right = matched["right_time"].isna()
     span_s = (matched["right_time"] - matched["left_time"]).dt.total_seconds()
     fraction = (matched["grid_time"] - matched["left_time"]).dt.total_seconds() / span_s
+    # A null on either side stays null. NaN propagates, so no is-None guard.
+    # interpolate_at needs the guard because 8.0 - None raises TypeError.
     blended = matched["left_value"] + fraction * (
         matched["right_value"] - matched["left_value"]
     )
