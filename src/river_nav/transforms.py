@@ -193,6 +193,8 @@ def interpolate_frame(
     ).sort_values([by, "grid_time"], kind="mergesort")
     ordered = readings.copy()
     ordered["observed_at_utc"] = pd.to_datetime(ordered["observed_at_utc"], utc=True)
+    # Stable sort keeps equal timestamps in input order. Backward as-of then
+    # takes the last duplicate, which is what bisect_right does.
     ordered = ordered.sort_values([by, "observed_at_utc"], kind="mergesort")
 
     left = pd.merge_asof(

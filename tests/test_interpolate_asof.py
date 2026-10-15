@@ -64,3 +64,12 @@ def test_point_before_first_reading_is_skipped():
 def test_point_after_last_reading_carries_forward():
     readings = [Reading(_ts(10, 0), 4.0)]
     _assert_matches(readings, [_ts(10, 0), _ts(10, 30)])
+
+
+def test_duplicate_timestamps_use_the_last_value():
+    readings = [
+        Reading(_ts(10, 0), 4.0),
+        Reading(_ts(10, 0), 6.0),
+        Reading(_ts(10, 30), 10.0),
+    ]
+    _assert_matches(readings, [_ts(10, 15)])
