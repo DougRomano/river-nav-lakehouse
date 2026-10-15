@@ -6,6 +6,7 @@ functions are the executable specification of those rules.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -136,6 +137,10 @@ def delay_minutes(arrived_at: datetime, started_lockage_at: datetime | None) -> 
     return round(minutes, 1)
 
 
+# ---------------------------------------------------------------------------
+# 15-minute grid interpolation
+# ---------------------------------------------------------------------------
+
 @dataclass(frozen=True)
 class Reading:
     observed_at_utc: datetime
@@ -145,7 +150,25 @@ def interpolate_at(
     readings: list[Reading], grid: list[datetime]
 ) -> list[tuple[datetime, float | None]]:
     """Value at each grid time, linearly interpolated between the nearest readings."""
-    raise NotImplementedError
+    ordered = sorted(readings, key=lambda r: r.observed_at_utc)
+    times = [r.observed_at_utc for r in ordered]
+    found: list[tuple[datetime, float | None]] = []
+    for t in grid:
+        # Last reading at or before t: TOP 1 WHERE observed_at <= t ORDER BY observed_at DESC.
+        i = bisect_right(times, t) - 1
+        if i < 0:
+            continue
+        left = ordered[i]
+        if left.observed_at_utc == t:
+            found.append((t, left.value))
+            continue
+        if i + 1 >= len(ordered):
+            continue
+        right = ordered[i + 1]
+        span = (right.observed_at_utc - left.observed_at_utc).total_seconds()
+        fraction = (t - left.observed_at_utc).total_seconds() / span
+        found.append((t, left.value + fraction * (right.value - left.value)))
+    return found
 
 def floor_15(ts: datetime) -> datetime:
     """Floor to the nearest 15-minute mark."""
