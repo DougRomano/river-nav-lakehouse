@@ -11,6 +11,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 
+import pandas as pd
+
 USGS_NO_DATA_SENTINELS = {-999999.0, -999999}
 
 
@@ -173,6 +175,31 @@ def interpolate_at(
         fraction = (t - left.observed_at_utc).total_seconds() / span
         found.append((t, left.value + fraction * (right.value - left.value)))
     return found
+
+def interpolate_frame(
+    readings: pd.DataFrame, grid: list[datetime], by: str
+) -> pd.DataFrame:
+    """Last reading at or before each grid time, within each `by` group.
+
+    `direction="backward"` is the bisect_right lookup: last row with
+    observed_at_utc <= grid_time. An exact grid time returns that reading.
+    """
+    groups = readings[[by]].drop_duplicates()
+    grid_frame = groups.merge(
+        pd.DataFrame({"grid_time": pd.to_datetime(list(grid), utc=True)}), how="cross"
+    ).sort_values([by, "grid_time"], kind="mergesort")
+    ordered = readings.copy()
+    ordered["observed_at_utc"] = pd.to_datetime(ordered["observed_at_utc"], utc=True)
+    ordered = ordered.sort_values([by, "observed_at_utc"], kind="mergesort")
+    matched = pd.merge_asof(
+        grid_frame,
+        ordered,
+        left_on="grid_time",
+        right_on="observed_at_utc",
+        by=by,
+        direction="backward",
+    )
+    return matched[[by, "grid_time", "value"]].reset_index(drop=True)
 
 def floor_15(ts: datetime) -> datetime:
     """Floor to the nearest 15-minute mark."""
