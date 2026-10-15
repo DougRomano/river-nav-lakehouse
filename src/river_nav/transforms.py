@@ -179,8 +179,11 @@ def floor_15(ts: datetime) -> datetime:
     return ts.replace(second=0, microsecond=0, minute=ts.minute // 15 * 15)
 
 def ceil_15(ts: datetime) -> datetime:
-    """Ceil to the nearest 15-minute mark."""
-    return ts.replace(second=0, microsecond=0, minute=ts.minute // 15 * 15 + 15)
+    """Ceil to the nearest 15-minute mark. A time already on a boundary stays put."""
+    floored = floor_15(ts)
+    if floored == ts:
+        return ts
+    return floored + timedelta(minutes=15)
 
 def interpolate_angle(start_deg: float, end_deg: float, fraction: float) -> float:
     """Interpolate between two angles, wrapping around at 360°."""

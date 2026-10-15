@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from river_nav.transforms import Reading, floor_15, interpolate_at
+from river_nav.transforms import Reading, ceil_15, floor_15, interpolate_angle, interpolate_at
 
 
 def _ts(hour: int, minute: int, second: int = 0) -> datetime:
@@ -58,3 +58,13 @@ def test_missing_value_on_either_side_yields_none():
 
 def test_floor_15_drops_minutes_and_seconds():
     assert floor_15(_ts(10, 7, 30)) == _ts(10, 0)
+
+
+def test_ceil_15_keeps_an_exact_boundary():
+    assert ceil_15(_ts(10, 7, 30)) == _ts(10, 15)
+    assert ceil_15(_ts(10, 15)) == _ts(10, 15)
+
+
+def test_interpolate_angle_takes_the_short_arc():
+    assert interpolate_angle(355, 10, 0.5) == pytest.approx(2.5)
+    assert interpolate_angle(10, 20, 0.5) == pytest.approx(15)
