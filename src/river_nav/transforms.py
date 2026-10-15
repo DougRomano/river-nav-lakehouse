@@ -163,8 +163,12 @@ def interpolate_at(
             found.append((t, left.value))
             continue
         if i + 1 >= len(ordered):
+            found.append((t, left.value))
             continue
         right = ordered[i + 1]
+        if left.value is None or right.value is None:
+            found.append((t, None))
+            continue
         span = (right.observed_at_utc - left.observed_at_utc).total_seconds()
         fraction = (t - left.observed_at_utc).total_seconds() / span
         found.append((t, left.value + fraction * (right.value - left.value)))
