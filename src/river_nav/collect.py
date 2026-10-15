@@ -66,6 +66,36 @@ class UsgsPull:
     features: int
 
 
+def _land_gauge_window(
+    base: str | Path,
+    session: requests.Session | None,
+    monitoring_location_id: str,
+    parameter_code: str,
+    start: datetime,
+    end: datetime,
+    run_at: datetime,
+) -> UsgsPull:
+    """Land every page of one gauge, parameter and window."""
+    url = continuous_url(monitoring_location_id, parameter_code, start, end)
+    pages = 0
+    features = 0
+    for i, page in enumerate(fetch_pages(url, session)):
+        features += len(page.get("features", []))
+        page["_collector"] = {
+            "source_url": url,
+            "collected_at_utc": run_at.isoformat(),
+        }
+        land(
+            base,
+            "usgs_continuous",
+            json.dumps(page),
+            run_at,
+            suffix=f"_{monitoring_location_id}_{parameter_code}_{i}",
+        )
+        pages += 1
+    return UsgsPull(monitoring_location_id, parameter_code, pages, features)
+
+
 def collect_usgs(
     base: str | Path,
     session: requests.Session | None,
@@ -74,40 +104,30 @@ def collect_usgs(
     run_at: datetime,
 ) -> list[UsgsPull]:
     """Land every page of gage height and discharge for each tracked gauge."""
-    pulls: list[UsgsPull] = []
-    for gauge in GAUGES:
-        for code in gauge.parameter_codes:
-            url = continuous_url(gauge.monitoring_location_id, code, start, end)
-            pages = 0
-            features = 0
-            for i, page in enumerate(fetch_pages(url, session)):
-                features += len(page.get("features", []))
-                page["_collector"] = {
-                    "source_url": url,
-                    "collected_at_utc": run_at.isoformat(),
-                }
-                land(
-                    base,
-                    "usgs_continuous",
-                    json.dumps(page),
-                    run_at,
-                    suffix=f"_{gauge.monitoring_location_id}_{code}_{i}",
-                )
-                pages += 1
-            pulls.append(UsgsPull(gauge.monitoring_location_id, code, pages, features))
-    return pulls
+    return [
+        _land_gauge_window(
+            base, session, gauge.monitoring_location_id, code, start, end, run_at
+        )
+        for gauge in GAUGES
+        for code in gauge.parameter_codes
+    ]
 
 
 def backfill_usgs(
     base: str | Path,
-    session: requests.Session,
+    session: requests.Session | None,
     end: datetime,
     days: int = BACKFILL_DAYS,
 ) -> list[UsgsPull]:
-    """History load: one request per gauge and parameter, default 400 days."""
-    calls = usgs_backfill_calls(end, days)
-    start = calls[0][2]
-    return collect_usgs(base, session, start, end, end)
+    """History load: one request per window from ``usgs_backfill_calls``.
+
+    Default is 400 days, four gauges, discharge and gage height. Each tuple
+    is requested as written.
+    """
+    return [
+        _land_gauge_window(base, session, gauge_id, code, start, window_end, end)
+        for gauge_id, code, start, window_end in usgs_backfill_calls(end, days)
+    ]
 
 
 def collect_waterway_locks(

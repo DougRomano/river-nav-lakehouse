@@ -45,6 +45,19 @@ def test_parse_marks_approved_readings():
     assert not parse_gauge_feature(feature("1.0", status="Approved")).is_provisional
 
 
+def test_parse_keeps_only_instantaneous_statistics():
+    # 00011 is instantaneous. A daily mean (00003) is a different series.
+    # A missing statistic_id stays: older pages omit the field.
+    instant = feature("12.34")
+    instant["properties"]["statistic_id"] = "00011"
+    daily = feature("1.0")
+    daily["properties"]["statistic_id"] = "00003"
+
+    assert parse_gauge_feature(instant).value == pytest.approx(12.34)
+    assert parse_gauge_feature(feature("1.0")) is not None
+    assert parse_gauge_feature(daily) is None
+
+
 def test_to_utc_rejects_naive_timestamps():
     with pytest.raises(ValueError):
         to_utc("2026-10-13T08:15:00")

@@ -2,12 +2,15 @@
 
 Rules mirror river_nav.transforms (the unit-tested specification):
   - timestamps to UTC, no-data sentinels to null
+  - instantaneous statistic only (00011, or statistic_id absent); see is_instantaneous
   - provisional readings upserted when USGS revises them (AUTO CDC, SCD1)
   - lock characteristics tracked as SCD Type 2
 """
 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
+
+from river_nav.transforms import INSTANTANEOUS_STATISTIC_ID
 
 NO_DATA = -999999.0
 
@@ -27,7 +30,10 @@ def v_usgs_readings():
     )
     p = "f.properties"
     value = F.col(f"{p}.value").cast("double")
-    return features.select(
+    # is_instantaneous: 00011, or the field omitted. A daily mean must not join the series.
+    stat = F.col(f"{p}.statistic_id")
+    instantaneous = stat.isNull() | (stat == F.lit(INSTANTANEOUS_STATISTIC_ID))
+    return features.where(instantaneous).select(
         F.col(f"{p}.monitoring_location_id").alias("monitoring_location_id"),
         F.col(f"{p}.parameter_code").alias("parameter_code"),
         F.to_utc_timestamp(F.to_timestamp(F.col(f"{p}.time")), "UTC").alias("observed_at_utc"),

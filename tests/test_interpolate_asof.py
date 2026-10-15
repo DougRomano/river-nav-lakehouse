@@ -4,7 +4,7 @@ Same readings as tests/test_interpolate.py. Each test is added only after the
 previous one is green, and the frame result must match the pure-Python list.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -67,6 +67,8 @@ def test_point_after_last_reading_carries_forward():
 
 
 def test_duplicate_timestamps_use_the_last_value():
+    # Last in the list, because the sort is stable. Not the latest revision.
+    # Callers dedupe with latest_per_key before they get here.
     readings = [
         Reading(_ts(10, 0), 4.0),
         Reading(_ts(10, 0), 6.0),
@@ -84,6 +86,21 @@ def test_right_neighbor_is_the_first_duplicate():
         Reading(_ts(10, 0), 6.0),
     ]
     _assert_matches(readings, [_ts(9, 30)])
+
+
+def test_gap_longer_than_two_hours_matches_interpolate_at():
+    start = _ts(10, 0)
+    end = start + timedelta(days=2)
+    readings = [Reading(start, 4.0), Reading(end, 8.0)]
+    grid = [start + timedelta(hours=1), end, end + timedelta(hours=3)]
+    _assert_matches(readings, grid)
+
+
+def test_gap_of_two_hours_matches_interpolate_at():
+    start = _ts(10, 0)
+    end = start + timedelta(hours=2)
+    readings = [Reading(start, 4.0), Reading(end, 8.0)]
+    _assert_matches(readings, [start + timedelta(hours=1), end + timedelta(hours=2)])
 
 
 def test_missing_value_on_either_side_yields_none():

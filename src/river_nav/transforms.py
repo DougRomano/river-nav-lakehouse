@@ -15,6 +15,13 @@ import pandas as pd
 
 USGS_NO_DATA_SENTINELS = {-999999.0, -999999}
 
+# Instantaneous value. A daily mean (00003) and any other statistic are a
+# different series and must not be parsed into the same gauge readings.
+INSTANTANEOUS_STATISTIC_ID = "00011"
+
+# The gauges report about every 30 minutes. Two hours is four missed intervals.
+MAX_GAP = timedelta(hours=2)
+
 
 # ---------------------------------------------------------------------------
 # Gauge readings
@@ -29,8 +36,20 @@ class GaugeReading:
     is_provisional: bool
 
 
-def parse_gauge_feature(feature: dict) -> GaugeReading:
+def is_instantaneous(statistic_id: str | None) -> bool:
+    """True when the reading belongs on the instantaneous series.
+
+    ``00011`` is instantaneous. A missing id is kept, because a page can omit
+    the field. Any other id is a different series.
+    """
+    return statistic_id in (None, INSTANTANEOUS_STATISTIC_ID)
+
+
+def parse_gauge_feature(feature: dict) -> GaugeReading | None:
     """Turn one GeoJSON feature from the `continuous` collection into a typed reading.
+
+    Returns None when ``statistic_id`` names something other than instantaneous.
+    See ``is_instantaneous``.
 
     - Times are normalized to UTC.
     - USGS no-data sentinels become None.
@@ -38,6 +57,8 @@ def parse_gauge_feature(feature: dict) -> GaugeReading:
       because USGS revises them later: silver must upsert, not append.
     """
     props = feature.get("properties", {})
+    if not is_instantaneous(props.get("statistic_id")):
+        return None
     raw_value = props.get("value")
     value = None if raw_value in (None, "") else float(raw_value)
     if value in USGS_NO_DATA_SENTINELS:
@@ -149,9 +170,23 @@ class Reading:
     value: float | None
 
 def interpolate_at(
-    readings: list[Reading], grid: list[datetime]
+    readings: list[Reading],
+    grid: list[datetime],
+    max_gap: timedelta = MAX_GAP,
 ) -> list[tuple[datetime, float | None]]:
-    """Value at each grid time, linearly interpolated between the nearest readings."""
+    """Value at each grid time, linearly interpolated between the nearest readings.
+
+    Callers must dedupe first (``latest_per_key``). This function does not.
+    The timestamp sort is stable, so equal timestamps stay in input order:
+    the left neighbor is the last row in the list, and the right neighbor is
+    the first. That is not the most recent revision.
+
+    A gap longer than ``max_gap`` (default two hours) is left empty. A grid
+    time between two readings that far apart is None, and so is a grid time
+    more than ``max_gap`` after the last reading. An exact timestamp keeps
+    its value. A shorter tail after the last reading still carries that
+    value forward.
+    """
     ordered = sorted(readings, key=lambda r: r.observed_at_utc)
     times = [r.observed_at_utc for r in ordered]
     found: list[tuple[datetime, float | None]] = []
@@ -165,9 +200,13 @@ def interpolate_at(
             found.append((t, left.value))
             continue
         if i + 1 >= len(ordered):
-            found.append((t, left.value))
+            age = t - left.observed_at_utc
+            found.append((t, left.value if age <= max_gap else None))
             continue
         right = ordered[i + 1]
+        if right.observed_at_utc - left.observed_at_utc > max_gap:
+            found.append((t, None))
+            continue
         if left.value is None or right.value is None:
             found.append((t, None))
             continue
@@ -177,15 +216,26 @@ def interpolate_at(
     return found
 
 def interpolate_frame(
-    readings: pd.DataFrame, grid: list[datetime], by: str
+    readings: pd.DataFrame,
+    grid: list[datetime],
+    by: str,
+    max_gap: timedelta = MAX_GAP,
 ) -> pd.DataFrame:
     """Value at each grid time, within each `by` group.
 
     Backward as-of is the bisect_right lookup: last row with observed_at_utc
     <= grid_time. Forward as-of, with exact matches off, is the first strictly
     later row. A grid time with no backward match is dropped. An exact grid
-    time, or one with no forward match, keeps the backward value. A time
-    between two readings is left + fraction * (right - left).
+    time keeps the backward value. A time between two readings is
+    left + fraction * (right - left), unless those readings are more than
+    ``max_gap`` apart (default two hours), in which case the value is missing.
+    With no forward match, the backward value carries forward only while the
+    grid time is within ``max_gap`` of that reading.
+
+    Callers must dedupe first (``latest_per_key``). This function does not.
+    The time sort is stable, so equal timestamps stay in input order:
+    backward as-of takes the last row in the list, and forward as-of takes
+    the first strictly later row. That is not the most recent revision.
     """
     groups = readings[[by]].drop_duplicates()
     grid_frame = groups.merge(
@@ -223,14 +273,22 @@ def interpolate_frame(
     exact = matched["left_time"].eq(matched["grid_time"])
     # i + 1 >= len(ordered): nothing strictly after this grid time.
     no_right = matched["right_time"].isna()
+    max_gap_s = max_gap.total_seconds()
+    since_left_s = (matched["grid_time"] - matched["left_time"]).dt.total_seconds()
     span_s = (matched["right_time"] - matched["left_time"]).dt.total_seconds()
-    fraction = (matched["grid_time"] - matched["left_time"]).dt.total_seconds() / span_s
+    fraction = since_left_s / span_s
     # A null on either side stays null. NaN propagates, so no is-None guard.
     # interpolate_at needs the guard because 8.0 - None raises TypeError.
     blended = matched["left_value"] + fraction * (
         matched["right_value"] - matched["left_value"]
     )
     matched["value"] = blended.where(~exact & ~no_right, matched["left_value"])
+    # A bracket wider than max_gap is empty all the way across, including next
+    # to the left reading. After the last reading, the gap is the time since it.
+    # span_s is NaN when there is no right neighbor, and NaN > max_gap is false.
+    too_wide = ~exact & span_s.gt(max_gap_s)
+    stale = no_right & since_left_s.gt(max_gap_s)
+    matched["value"] = matched["value"].mask(too_wide | stale)
     return matched[[by, "grid_time", "value"]].reset_index(drop=True)
 
 def floor_15(ts: datetime) -> datetime:
