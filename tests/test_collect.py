@@ -1,6 +1,12 @@
 from datetime import UTC, datetime, timedelta
 
-from river_nav.collect import BACKFILL_DAYS, collect_usgs, land, usgs_backfill_calls
+from river_nav.collect import (
+    BACKFILL_DAYS,
+    collect_usgs,
+    collect_waterway_locks,
+    land,
+    usgs_backfill_calls,
+)
 from river_nav.config import GAUGES, PARAM_DISCHARGE_CFS, PARAM_GAGE_HEIGHT_FT
 
 
@@ -52,3 +58,43 @@ def test_collect_usgs_lands_every_page(tmp_path, monkeypatch):
     assert sum(pull.features for pull in pulls) == 24
     landed = list(tmp_path.glob("usgs_continuous/ingest_date=2026-10-15/*.json"))
     assert len(landed) == 16
+
+
+def test_land_nested_source_names_the_file_after_the_last_segment(tmp_path):
+    run_at = datetime(2026, 10, 15, 20, 0, tzinfo=UTC)
+    path = land(tmp_path, "reference/waterway_locks", b"a,b\n1,2\n", run_at, ext="csv")
+    assert path == (
+        tmp_path
+        / "reference"
+        / "waterway_locks"
+        / "ingest_date=2026-10-15"
+        / "waterway_locks_20261015T200000Z.csv"
+    )
+
+
+class _Response:
+    def __init__(self, content: bytes):
+        self.content = content
+
+    def raise_for_status(self):
+        pass
+
+
+class _Session:
+    def __init__(self, content: bytes):
+        self.content = content
+        self.calls: list[str] = []
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        return _Response(self.content)
+
+
+def test_collect_waterway_locks_lands_the_csv_as_received(tmp_path):
+    body = "\ufeffOBJECTID,NDCCODE\n1,3020090601\n".encode()
+    session = _Session(body)
+    run_at = datetime(2026, 10, 15, 20, 0, tzinfo=UTC)
+    path = collect_waterway_locks(tmp_path, session, run_at, url="https://example.test/locks.csv")
+    assert session.calls == ["https://example.test/locks.csv"]
+    assert path.parent == tmp_path / "reference" / "waterway_locks" / "ingest_date=2026-10-15"
+    assert path.read_bytes() == body  # BOM and all: bronze keeps payloads as received

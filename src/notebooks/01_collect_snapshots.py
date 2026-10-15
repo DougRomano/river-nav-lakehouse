@@ -4,7 +4,7 @@
 # MAGIC Lands raw API responses in the landing Volume, exactly as received.
 # MAGIC Bronze ingests these files with Auto Loader. Nothing is parsed here.
 # MAGIC
-# MAGIC Layout: `<raw_volume>/<source>/ingest_date=YYYY-MM-DD/<source>_<utc-timestamp>[_<n>].json`
+# MAGIC Layout: `<raw_volume>/<source>/ingest_date=YYYY-MM-DD/<name>_<utc-timestamp>[_<n>].<ext>`
 
 # COMMAND ----------
 
@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 
 import requests
 
-from river_nav.collect import collect_usgs, land
+from river_nav.collect import collect_usgs, collect_waterway_locks, land
 from river_nav.config import corps_locks_sources
 from river_nav.corps_locks_client import polite_get
 
@@ -55,3 +55,14 @@ for name, url in corps_locks_sources(run_at.date()):
     body = polite_get(session, url)  # 5 requests/min limit; ~4 min per run
     land(raw_volume, f"corps_locks_{name}", body, run_at)
     print(f"Corps Locks: landed {name} ({len(body):,} bytes)")
+
+# COMMAND ----------
+
+# MAGIC %md ## Waterway Locks reference (lock characteristics)
+# MAGIC Rarely changes, so a full CSV snapshot per run is cheap (~67 KB) and gives the
+# MAGIC silver SCD2 flow a new version to compare against. Landed as received, BOM included.
+
+# COMMAND ----------
+
+path = collect_waterway_locks(raw_volume, session, run_at)
+print(f"Waterway Locks: landed {path.name}")

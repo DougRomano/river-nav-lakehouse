@@ -1,6 +1,8 @@
 """Land raw API payloads. Bronze reads the files; nothing is parsed here.
 
-Layout: `<base>/<source>/ingest_date=YYYY-MM-DD/<source>_<utc-stamp>[_<suffix>].json`
+Layout: `<base>/<source>/ingest_date=YYYY-MM-DD/<name>_<utc-stamp>[_<suffix>].<ext>`
+
+`source` may be nested (`reference/waterway_locks`); `name` is its last segment.
 
 The base path is an argument. Locally it is `data/raw`. On Databricks it is the
 landing Volume. Same layout either way.
@@ -15,7 +17,7 @@ from pathlib import Path
 
 import requests
 
-from river_nav.config import GAUGES
+from river_nav.config import GAUGES, WATERWAY_LOCKS_CSV_URL
 from river_nav.usgs_client import continuous_url, fetch_pages
 
 BACKFILL_DAYS = 400
@@ -34,7 +36,7 @@ def land(
     stamp = f"{run_at:%Y%m%dT%H%M%SZ}"
     folder = Path(base) / source / f"ingest_date={run_at:%Y-%m-%d}"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{source}_{stamp}{suffix}.{ext}"
+    path = folder / f"{Path(source).name}_{stamp}{suffix}.{ext}"
     if isinstance(payload, bytes):
         path.write_bytes(payload)
     else:
@@ -106,3 +108,19 @@ def backfill_usgs(
     calls = usgs_backfill_calls(end, days)
     start = calls[0][2]
     return collect_usgs(base, session, start, end, end)
+
+
+def collect_waterway_locks(
+    base: str | Path,
+    session: requests.Session,
+    run_at: datetime,
+    url: str = WATERWAY_LOCKS_CSV_URL,
+) -> Path:
+    """Land the USACE Waterway Locks CSV, as received, under `reference/waterway_locks`.
+
+    Lock characteristics change rarely, so this is a periodic full snapshot, not a
+    window. Each landed file is a new version for the SCD2 flow in silver.
+    """
+    resp = session.get(url, timeout=60, allow_redirects=True)
+    resp.raise_for_status()
+    return land(base, "reference/waterway_locks", resp.content, run_at, ext="csv")
