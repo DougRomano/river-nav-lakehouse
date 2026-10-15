@@ -9,7 +9,7 @@
 # COMMAND ----------
 
 dbutils.widgets.text("raw_volume", "/Volumes/river_nav_dev/nav_raw/landing")
-dbutils.widgets.text("lookback_hours", "2")
+dbutils.widgets.text("lookback_hours", "6")  # USGS lags ~2.5 h; overlap is deduped in silver
 
 raw_volume = dbutils.widgets.get("raw_volume")
 lookback_hours = int(dbutils.widgets.get("lookback_hours"))
@@ -26,7 +26,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "..")))
 
 import requests
 
-from river_nav.config import CORPS_LOCKS_SOURCES, GAUGES
+from river_nav.config import GAUGES, corps_locks_sources
+from river_nav.corps_locks_client import polite_get
 from river_nav.usgs_client import continuous_url, fetch_pages
 
 run_at = datetime.now(UTC)
@@ -68,18 +69,13 @@ print(f"USGS: landed {landed} pages")
 
 # COMMAND ----------
 
-# MAGIC %md ## Corps Locks snapshots
-# MAGIC Populate `CORPS_LOCKS_SOURCES` in `river_nav/config.py` after the week-2 spike.
+# MAGIC %md ## Corps Locks (USACE NDC Data Web Services)
+# MAGIC Traffic and queue keep only ~30 days; status and delay are snapshots. Bodies are
+# MAGIC landed as-is (served as text/html, and lock_delay_json is not always valid JSON).
 
 # COMMAND ----------
 
-if not CORPS_LOCKS_SOURCES:
-    print("Corps Locks: no sources configured yet — skipping")
-else:
-    for name, url in CORPS_LOCKS_SOURCES:
-        resp = session.get(url, timeout=60)
-        resp.raise_for_status()
-        ctype = resp.headers.get("content-type", "")
-        ext = "json" if "json" in ctype else ("csv" if "csv" in ctype else "html")
-        land(f"corps_locks_{name}", resp.content, ext=ext)
-        print(f"Corps Locks: landed {name} ({ext})")
+for name, url in corps_locks_sources(run_at.date()):
+    body = polite_get(session, url)  # 5 requests/min limit; ~4 min per run
+    land(f"corps_locks_{name}", body, ext="json")
+    print(f"Corps Locks: landed {name} ({len(body):,} bytes)")

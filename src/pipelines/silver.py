@@ -63,15 +63,24 @@ dp.create_auto_cdc_flow(
 @dp.view(name="v_lock_characteristics")
 @dp.expect_or_drop("has_lock_id", "lock_id IS NOT NULL")
 def v_lock_characteristics():
-    # VERIFY column names against the Waterway Locks data dictionary
-    # (https://doi.org/10.21949/180Q-FC93) and adjust the mapping below.
+    # Columns verified 2026-10-13 against the BTS/USACE Waterway Locks FeatureServer
+    # (see config.WATERWAY_LOCKS_URL). Grain is one row per lock CHAMBER, keyed by NDCCODE.
+    # STATUS is a numeric code ('1','2','5'...): VERIFY its meanings in the data dictionary
+    # (https://doi.org/10.21949/180Q-FC93) before decoding it in gold.
     src = spark.readStream.table("bronze_lock_characteristics")  # noqa: F821
     return src.select(
-        F.trim(F.col("NDC_LOCK_ID")).alias("lock_id"),          # VERIFY
-        F.initcap(F.trim(F.col("LOCK_NAME"))).alias("name"),     # VERIFY
-        F.trim(F.col("RIVER_NAME")).alias("river"),              # VERIFY
-        F.col("NUMBER_OF_CHAMBERS").cast("int").alias("chamber_count"),  # VERIFY
-        F.upper(F.trim(F.col("STATUS"))).alias("status"),        # VERIFY
+        F.trim(F.col("NDCCODE")).alias("lock_id"),
+        F.concat_ws("-", F.trim("RIVERCD"), F.trim("LOCKCD")).alias("lock_code"),
+        F.initcap(F.trim(F.col("PMSNAME"))).alias("name"),
+        F.initcap(F.trim(F.col("CHAMBN"))).alias("chamber"),
+        F.initcap(F.trim(F.col("RIVER"))).alias("river"),
+        F.col("RIVERMI").cast("double").alias("river_mile"),
+        F.col("NOCHMB").cast("int").alias("chamber_count"),
+        F.col("LENGTH").cast("double").alias("length_ft"),
+        F.col("WIDTH").cast("double").alias("width_ft"),
+        F.col("LIFT").cast("double").alias("lift_ft"),
+        F.trim(F.col("DISTRICT")).alias("district"),
+        F.trim(F.col("STATUS")).alias("status"),
         F.col("_ingested_at"),
     )
 
@@ -88,5 +97,7 @@ dp.create_auto_cdc_flow(
     keys=["lock_id"],
     sequence_by=F.col("_ingested_at"),
     stored_as_scd_type=2,
-    track_history_column_list=["name", "river", "chamber_count", "status"],
+    track_history_column_list=[
+        "name", "chamber_count", "length_ft", "width_ft", "lift_ft", "status",
+    ],
 )
