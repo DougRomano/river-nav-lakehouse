@@ -1,37 +1,312 @@
-# Learning log
+# Learning Log
 
-One entry per week. Each entry is raw material for a romano.io post.
+This is the raw record behind my romano.io lakehouse series. I write down what I
+built, what broke, and what surprised me. The numbers matter. They keep the story
+honest.
 
-## Template
+## Entry Format
 
-### Week N — <topic>
-- **Built:**
-- **Surprised me (vs. SQL Server / .NET):**
-- **Broke and how I fixed it:**
-- **Numbers:** (rows, runtime, cost)
-- **Post angle:**
+### Week N: Topic
 
----
+**What I built**
 
-### Week 1 — Python for the .NET developer
-- **Built:** 2026-10-15: `Reading`, `interpolate_at`, `floor_15`, `ceil_15`, and `interpolate_angle` in `src/river_nav/transforms.py`, with `tests/test_interpolate.py`. Nine tests, each added only after the previous one was green. `make check`: 27 passed, ruff clean. No Spark yet. The gold pipeline still only floors an observed minute into `time_key`; mirroring these rules there is the next session.
-- **Surprised me (vs. SQL Server / .NET):** `bisect_right` on the sorted timestamps is `SELECT TOP 1 … WHERE observed_at <= @t ORDER BY observed_at DESC`. The index it returns is the last equal timestamp, so the next neighbor is always strictly later. That is the procedure's `p2.time > p1.time` guard. `bisect_left` would stop on the first duplicate and divide by a zero-length span. A point before the first reading (`bisect_right - 1 < 0`) is the `WHERE p1.Id IS NOT NULL` filter, and it was already true once the halfway branch existed, so that test never went red. Same for duplicates. Python's `%` on a negative number is what makes the angle wrap work: `(-165) % 360` is `195`, not `-165`. Null arithmetic is the other shock. In C#, `float?` lifts the operators, so `(float?)null - 8f` is `null` and does not throw. `value: float | None` only tells the type checker; at runtime `8.0 - None` is a `TypeError`. The `is None` guard before the blend is the check `float?` was doing for free.
-- **Broke and how I fixed it:** `ceil_15` always added 15 minutes, so 10:15:00 became 10:30:00. Floor first, and add `timedelta(minutes=15)` only when the floor is earlier. `timedelta` also rolls 10:45:30 to 11:00:00; `replace(minute=60)` would throw. A `None` on either side of a blend raised `TypeError` on `8.0 - None`. Guard before the arithmetic and return `None`. A straight average of 355° and 10° is 182.5°, the long way around. The short arc is +15°, so halfway is 2.5°. That stays in `interpolate_angle`. Stage in feet does not wrap.
-- **Numbers:** Nine new tests, about 0.08s for the whole suite. Synthetic readings only (10:00 = 4.0, 10:30 = 8.0, grid point 10:15 = 6.0). The Corps Locks traffic file in `data/raw` is 211 objects with string times like `"09/20/26 16:12"`. Nothing there is a gauge reading, so it never entered these tests.
-- **Post angle:** C# ↔ Python cheat sheet for senior .NET devs. Today's example is porting a `TOP 1` interpolation procedure: one failing assertion, then the smallest branch that turns it green. `bisect_right` replaces the `ORDER BY`, `float?` versus `float | None` is the null row, and two tests that never fail are the lesson that the guard from the previous rule was already the next rule.
+**What surprised me**
 
-Same day, second pass: `interpolate_frame` is the pandas spelling of `interpolate_at`.
+**What broke**
 
-- **Built:** 2026-10-15: `interpolate_frame` in `src/river_nav/transforms.py` and `tests/test_interpolate_asof.py`. Eight tests, each added only after the previous one was green, each frame checked against `interpolate_at`. `pandas>=2.2` declared in `pyproject.toml`. `make check`: 35 passed, ruff clean, 0.44s. `fifteen_minute_grid` then `scripts/align_gauges.py --days 2` put Grafton, St. Louis, Chester, and Valley City gage height (00065) on one grid, 2026-10-13 20:00Z through 2026-10-15 19:30Z. The key stays in `.env` as `USGS_API_KEY`; the client only reads the environment, so the run sourced that file. No Spark.
-- **Surprised me (vs. SQL Server / .NET):** `merge_asof` is the `OUTER APPLY (SELECT TOP 1 …)`, not the interpolation. `direction="backward"` is `bisect_right - 1`: last row with `observed_at <= @t ORDER BY observed_at DESC`. `direction="forward"` with `allow_exact_matches=False` is `bisect_right` itself, the `ordered[i + 1]` neighbor, first row strictly later. `by="gauge_id"` is `PARTITION BY`, and it does not relax the sort. The time column itself has to be monotonic. Sorting by gauge, then time, makes the clock run 10:00, 10:30, 10:00. Pandas stores a missing reading as `NaN`. `NaN` propagates the way `float?` does in C# and the way `NULL` does in SQL. This morning `8.0 - None` raised `TypeError`, so `interpolate_at` guards with `is None`. `8.0 - NaN` is `NaN` and does not throw, so that guard is not in the frame path. The silence is the hazard. A missing right neighbor is also `NaN`, and the blend wiped a carry-forward that should have stayed 4.0.
-- **Broke and how I fixed it:** Halfway returned 4.0. Backward as-of only finds the left reading. The forward join plus `left + fraction * (right - left)` makes 10:15 equal 6.0. An exact hit still keeps the backward value, or 10:00 would be pulled toward the next reading. A grid time before the first reading stayed in the frame as `(10:00, None)` because `merge_asof` is a left join. `dropna` on `left_time` is the `bisect_right - 1 < 0` continue. Carry-forward at 10:30 came back null. Keep `left_value` when `right_time` is null. Two gauges on one frame raised `ValueError: right keys must be sorted`. Sort both frames on the time column only, `kind="mergesort"`. After that, g1 at 10:15 is 6.0 and g2, with readings 10.0 and 20.0, is 15.0. The live report then died on `min(readings)`: a dataclass does not order itself. `min` and `max` need `key=lambda r: r.observed_at_utc`, the same way `ORDER BY observed_at` is not `ORDER BY` the whole row.
-- **Numbers:** Eight new tests. Three never went red. Duplicate timestamps already blended to 8.0, because a stable sort leaves the last 10:00 in place and backward as-of takes it. The 09:30 case already blended to 2.5, because forward as-of takes the first later row, the 10:00 whose value is 4.0. Collapsing duplicates with `groupby.last()` first would still pass the 8.0 test and turn 2.5 into 3.5. A null on the left, the right, or an exact hit was already null via `NaN`. Whole suite 35 passed in 0.44s. Live run, about 2s for four gauges over two days: 96 readings each, median gap 30 minutes, 191 shared slots, 96 exact and 95 interpolated per gauge. Every cell matched `interpolate_at`. St. Louis 2026-10-13 20:15Z: 12.88 ft at 20:00Z and 12.86 ft at 20:30Z, halfway 12.87 ft.
-- **Post angle:** Same `TOP 1` procedure, second spelling. One join finds the left reading, one join finds the right reading, one line does the arithmetic. `NaN` behaves like `float?`, and that is how a carry-forward disappeared. `PARTITION BY` still requires the clock to be sorted.
+**Numbers**
 
-Same day, third pass: land the raw files, then backfill USGS history.
+**Possible post**
 
-- **Built:** 2026-10-15: `land` moved from `src/notebooks/01_collect_snapshots.py` into `src/river_nav/collect.py`. The base path is an argument, `data/raw` locally and the landing Volume on Databricks. `scripts/collect_local.py` and the notebook both call it. `usgs_backfill_calls` is four gauges times discharge `00060` and gage height `00065`, eight windows of 400 days. `scripts/backfill_usgs.py` ran that pull. `tests/test_collect.py`. `make check`: 40 passed, ruff clean.
-- **Surprised me (vs. SQL Server / .NET):** The notebook function closed over `raw_volume`, the stamp, and the partition. That is a captured local, the same as a C# method that reads a field instead of taking a parameter. Injecting the base path is just an argument. `Path.write_text` is UTF-8. The old `open(path, "w")` would have used the locale encoding. Eight requests are not eight files. The API pages at 10,000 features, and each series is about 17,000, so `fetch_pages` followed one `rel=next` and each call became two files. The `.env` file is still not read by `usgs_client`. The backfill script loads `USGS_API_KEY` from it when the shell has not exported the variable.
-- **Broke and how I fixed it:** The first draft of `collect_usgs` also called `usgs_backfill_calls(end, days=0)`. That raises `ValueError` because the span has to be positive, and the loop did nothing. Deleted before the live pull. Nothing else failed. Bodies are still landed as received, plus the `_collector` stamp the notebook was already adding.
-- **Numbers:** 400 days ending 2026-10-15 19:54Z. 8 calls, 16 pages, 140,548 features, 63s, 70 MB under `data/raw/usgs_continuous`. Grafton 17,648 discharge and 17,833 stage. St. Louis 17,425 and 17,407. Chester 17,306 and 17,306. Valley City 17,194 and 18,429. St. Louis stage on 2026-10-13 was 17,389 rows for the same kind of window. `data/` stays gitignored.
-- **Post angle:** A landing function with the folder injected is the difference between a notebook that can only write one Volume and a function the local script and the job can share. The page size is the other half: one logical backfill call is a loop until `rel=next` disappears.
+## Week 1: Python for a .NET Developer
+
+Date: October 15, 2026
+
+### Pass 1: Port the interpolation rules
+
+**What I built**
+
+I started with the old SQL Server interpolation logic. I wrote a pure Python
+version before I touched Spark.
+
+The first functions were `Reading`, `interpolate_at`, `floor_15`, `ceil_15`, and
+`interpolate_angle`. They live in `src/river_nav/transforms.py`.
+
+I wrote one test at a time. I watched each new test fail before I changed the
+code. The suite ended at 27 passing tests. Ruff was clean.
+
+Gold does not use these rules yet. It still puts each observed reading into a
+15-minute bucket. That is not interpolation.
+
+**What surprised me**
+
+`bisect_right` is Python's version of this SQL:
+
+```sql
+SELECT TOP 1 ...
+WHERE observed_at <= @t
+ORDER BY observed_at DESC
+```
+
+It returns the last matching timestamp. The next item is always later. That
+matches the old stored procedure's `p2.time > p1.time` check.
+
+`bisect_left` would return the first duplicate. That can give the code two
+readings with the same timestamp. The time span would be zero.
+
+Python handles null math very differently from C#. In C#, `float?` carries the
+null through the calculation. In Python, `8.0 - None` throws a `TypeError`. A
+type hint does not change runtime behavior. I had to check for `None` before the
+calculation.
+
+Python's remainder operator also helped with angles. `(-165) % 360` returns
+`195`. That makes the shortest path between 355 degrees and 10 degrees work.
+
+**What broke**
+
+My first `ceil_15` always added 15 minutes. A time of 10:15 became 10:30.
+
+The fix was simple. Floor the time first. Add 15 minutes only when the original
+time is later than the floor. `timedelta` also handles the hour change. A time of
+10:45:30 becomes 11:00:00.
+
+The first null test also failed. A missing value on either side of the line
+caused a `TypeError`. I added a guard and returned `None`.
+
+The first angle formula used a normal average. Halfway between 355 and 10 became
+182.5 degrees. That is the long path around the circle. The correct halfway
+value is 2.5 degrees.
+
+**Numbers**
+
+I added nine tests. The full suite ran in about 0.08 seconds.
+
+The sample was small on purpose:
+
+- 10:00 = 4.0
+- 10:30 = 8.0
+- 10:15 = 6.0
+
+I did not use the Corps Locks file for these tests. That file has 211 traffic
+records. It does not contain gauge readings.
+
+**Possible post**
+
+Port one `TOP 1` interpolation procedure from T-SQL to Python. Use one failing
+test for each rule. Compare `float?` with `float | None`. Show where the same
+idea has a different runtime behavior.
+
+### Pass 2: Write the same rules in pandas
+
+**What I built**
+
+Next I wrote `interpolate_frame`. It is the pandas version of `interpolate_at`.
+The two functions must return the same values.
+
+I added eight tests in `tests/test_interpolate_asof.py`. Each test runs the same
+readings through both functions and compares every result.
+
+I then ran the code against four live USGS gauges:
+
+- Grafton
+- St. Louis
+- Chester
+- Valley City
+
+The script put them on one 15-minute grid. The run covered October 13 at 20:00
+UTC through October 15 at 19:30 UTC.
+
+The suite ended at 35 passing tests. Ruff was clean. The run did not use Spark.
+
+**What surprised me**
+
+`merge_asof` does not interpolate. It only finds a nearby row.
+
+The backward join finds the last reading at or before the grid time. This is the
+pandas version of `bisect_right - 1`.
+
+The forward join finds the first reading after the grid time. This is the pandas
+version of the next item in the sorted list.
+
+I expected `by="gauge_id"` to handle the sort for each gauge. It does not. The
+time column must still be in order across the full frame. Sorting by gauge and
+then by time makes the clock move backward at every gauge boundary.
+
+Pandas stores missing numbers as `NaN`. Math with `NaN` does not throw. It
+quietly returns another `NaN`. That can hide a bug that pure Python exposes at
+once.
+
+**What broke**
+
+My first halfway value was 4.0 instead of 6.0. I had found only the reading on
+the left. I needed a second join to find the reading on the right.
+
+A grid time before the first reading stayed in the result as a null row. The
+pure Python function skips that row. I dropped rows with no left timestamp.
+
+A time after the last reading returned null. The rule at that point was to carry
+the last value forward. I kept the left value when no right reading existed.
+
+Two gauges caused this error:
+
+```text
+ValueError: right keys must be sorted
+```
+
+I fixed it by sorting on time with a stable sort. The `by` argument still keeps
+each gauge in its own series.
+
+The live report then failed on `min(readings)`. A Python dataclass does not sort
+itself. I gave `min` and `max` the timestamp as the key.
+
+**Numbers**
+
+The full suite passed 35 tests in 0.44 seconds.
+
+Each gauge had about 96 readings over two days. The median gap was 30 minutes.
+The shared grid had 191 slots. For each gauge, 96 slots were exact readings and
+95 were interpolated.
+
+Every pandas result matched the pure Python result.
+
+At St. Louis, the reading was 12.88 feet at 20:00 and 12.86 feet at 20:30. The
+20:15 value was 12.87 feet.
+
+Duplicate timestamps exposed an important detail. A stable sort keeps the input
+order. The backward join takes the last duplicate. The forward join takes the
+first later row. That is input order, not revision time.
+
+**Possible post**
+
+Show why one as-of join is not interpolation. One join finds the left value. A
+second join finds the right value. The math comes after both joins. Also show
+why `PARTITION BY` logic does not remove the need for a correct sort.
+
+### Pass 3: Land 400 days of USGS data
+
+**What I built**
+
+I moved `land` out of the collector notebook and into
+`src/river_nav/collect.py`.
+
+The function now accepts its base folder. Local scripts pass `data/raw`.
+Databricks passes the landing Volume. The notebook and local scripts use the
+same function.
+
+I added a USGS backfill for four gauges and two parameters:
+
+- Discharge, parameter `00060`
+- Gage height, parameter `00065`
+
+That creates eight API requests for a 400-day load.
+
+The suite ended at 40 passing tests. Ruff was clean.
+
+**What surprised me**
+
+The notebook version of `land` read values from the notebook around it. In C#
+terms, it acted like a method that reads fields instead of parameters. Passing
+the base path made the function easy to use in both places.
+
+Eight API requests did not create eight files. Each series had about 17,000
+readings. The USGS API returns at most 10,000 features per page. Each request
+needed two pages.
+
+`Path.write_text` uses UTF-8. The older `open(path, "w")` code used the machine's
+default encoding.
+
+The USGS client reads its API key from the process environment. The backfill
+script loads `.env` only when the shell has not already set the key.
+
+**What broke**
+
+An early draft called `usgs_backfill_calls(end, days=0)` inside `collect_usgs`.
+The helper rejects a zero-day window. The loop also did no useful work. I
+removed the call before the live run.
+
+The raw response still lands as received. The collector adds only its source
+URL and collection time.
+
+**Numbers**
+
+The backfill covered 400 days and ended on October 15, 2026 at 19:54 UTC.
+
+- 8 API requests
+- 16 pages
+- 140,548 features
+- 63 seconds
+- 70 MB of local raw data
+
+Counts by gauge:
+
+- Grafton: 17,648 discharge and 17,833 stage readings
+- St. Louis: 17,425 discharge and 17,407 stage readings
+- Chester: 17,306 discharge and 17,306 stage readings
+- Valley City: 17,194 discharge and 18,429 stage readings
+
+The `data` folder stays out of Git.
+
+**Possible post**
+
+One API request is not one file. Pagination changes the landing design. The
+other useful point is dependency injection in its smallest form: pass the base
+folder to the function instead of reading it from the notebook.
+
+### Pass 4: Stop inventing data during outages
+
+**What I built**
+
+The first interpolation code would draw a line across any gap. It also carried
+the last reading forward forever. The old stored procedure had the same flaw.
+
+I added a two-hour limit to both interpolation functions. A gap longer than two
+hours now returns `None`. A value after the last reading also returns `None`
+when the reading is more than two hours old.
+
+I added the failing pure Python test first. One hour into a two-day outage, the
+old code returned about 4.08. Three hours after the final reading, it still
+returned 8.0. Both values are now missing.
+
+I also moved the USGS statistic rule into `transforms.py`. Statistic `00011` is
+an instantaneous reading. Other statistic types do not belong in the same
+series. The silver pipeline now applies the same rule.
+
+The interpolation docstrings now tell callers to remove duplicate revisions
+first. A stable sort resolves equal timestamps by input order. It does not know
+which row is the newest revision.
+
+The backfill now uses every tuple returned by `usgs_backfill_calls`. It no
+longer takes the first start date and loops over the gauges a second time.
+
+Finally, `make check` now runs Ruff against `scripts` as well as `src` and
+`tests`.
+
+**What surprised me**
+
+The dangerous result looked reasonable. A smooth line across a two-day outage
+does not look broken on a chart. It looks cleaner than the truth.
+
+This is the same kind of bug I have seen in SQL reporting code. The query is
+valid. The numbers are valid. The business rule is wrong.
+
+**What broke**
+
+The three new tests failed for the right reasons.
+
+- The two-day gap returned an interpolated value.
+- A daily statistic was parsed as an instantaneous reading.
+- Backfill ignored the request plan and walked all gauges again.
+
+I fixed the pure functions first. Then I copied the statistic rule into the
+silver pipeline.
+
+**Numbers**
+
+The full suite now has 48 passing tests. It runs in about 0.64 seconds. Ruff is
+clean across `src`, `tests`, and `scripts`.
+
+**Possible post**
+
+The chart looked better when it was wrong. Show how a stored procedure and a
+Python port can share the same bad business rule. Then show the test that turns
+two days of smooth, invented readings into an honest gap.

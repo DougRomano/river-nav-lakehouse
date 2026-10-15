@@ -1,7 +1,8 @@
 """Put the four USGS gauges on one 15-minute gage-height grid.
 
 Fetches parameter 00065 (gage height, feet), interpolates with interpolate_frame,
-and checks every cell against interpolate_at.
+and checks every cell against interpolate_at. A gap longer than two hours is
+left empty. Readings are deduped with latest_per_key before either call.
 
   python scripts/align_gauges.py
   python scripts/align_gauges.py --days 2
@@ -26,8 +27,6 @@ from river_nav.transforms import (
     parse_gauge_feature,
 )
 from river_nav.usgs_client import continuous_url, fetch_pages
-
-INSTANTANEOUS = "00011"
 
 
 def main() -> int:
@@ -87,12 +86,11 @@ def _fetch(start: datetime, end: datetime) -> tuple[list[GaugeReading], int]:
             url = continuous_url(gauge.monitoring_location_id, PARAM_GAGE_HEIGHT_FT, start, end)
             for page in fetch_pages(url, session):
                 for feature in page.get("features", []):
-                    props = feature.get("properties", {})
-                    stat = props.get("statistic_id")
-                    if stat not in (None, INSTANTANEOUS):
+                    reading = parse_gauge_feature(feature)
+                    if reading is None:
                         skipped += 1
                         continue
-                    readings.append(parse_gauge_feature(feature))
+                    readings.append(reading)
             print(f"fetched {gauge.monitoring_location_id}", flush=True)
     return readings, skipped
 

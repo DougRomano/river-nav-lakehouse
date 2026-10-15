@@ -7,4 +7,4 @@ test:
 	.venv/bin/pytest
 
 lint:
-	.venv/bin/ruff check src tests
+	.venv/bin/ruff check src tests scripts

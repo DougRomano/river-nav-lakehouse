@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -44,6 +44,8 @@ def test_point_after_last_reading_carries_forward():
 
 
 def test_duplicate_timestamps_use_the_last_value():
+    # Last in the list, because the sort is stable. Not the latest revision.
+    # Callers dedupe with latest_per_key before they get here.
     readings = [
         Reading(_ts(10, 0), 4.0),
         Reading(_ts(10, 0), 6.0),
@@ -51,6 +53,33 @@ def test_duplicate_timestamps_use_the_last_value():
     ]
     result = interpolate_at(readings, [_ts(10, 15)])
     assert result == [(_ts(10, 15), pytest.approx(8.0))]
+
+
+def test_gap_longer_than_two_hours_is_missing():
+    # Grafton offline for two days must not become a straight line from 4 to 8,
+    # and the last reading must not carry forward past the two-hour limit.
+    start = _ts(10, 0)
+    end = start + timedelta(days=2)
+    readings = [Reading(start, 4.0), Reading(end, 8.0)]
+    between = start + timedelta(hours=1)
+    after = end + timedelta(hours=3)
+    assert interpolate_at(readings, [between, end, after]) == [
+        (between, None),
+        (end, pytest.approx(8.0)),
+        (after, None),
+    ]
+
+
+def test_gap_of_two_hours_still_fills():
+    # Longer than two hours is empty. A gap of exactly two hours still blends,
+    # and the last reading still carries forward out to that same limit.
+    start = _ts(10, 0)
+    end = start + timedelta(hours=2)
+    readings = [Reading(start, 4.0), Reading(end, 8.0)]
+    assert interpolate_at(readings, [start + timedelta(hours=1), end + timedelta(hours=2)]) == [
+        (start + timedelta(hours=1), pytest.approx(6.0)),
+        (end + timedelta(hours=2), pytest.approx(8.0)),
+    ]
 
 
 def test_missing_value_on_either_side_yields_none():

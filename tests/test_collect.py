@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from river_nav.collect import (
     BACKFILL_DAYS,
+    backfill_usgs,
     collect_usgs,
     collect_waterway_locks,
     land,
@@ -43,6 +44,40 @@ def test_usgs_backfill_is_one_call_per_gauge_and_parameter():
     start = end - timedelta(days=BACKFILL_DAYS)
     windows = {(window_start, window_end) for _, _, window_start, window_end in calls}
     assert windows == {(start, end)}
+
+
+def test_backfill_usgs_uses_each_planned_window(tmp_path, monkeypatch):
+    # The call list is the plan. Different windows must be requested as written,
+    # not collapsed to the first start while collect_usgs walks the gauges again.
+    end = datetime(2026, 10, 15, tzinfo=UTC)
+    early = end - timedelta(days=10)
+    late = end - timedelta(days=3)
+    planned = [
+        ("USGS-05587450", "00065", early, end),
+        ("USGS-07010000", "00060", late, end),
+    ]
+    urls: list[str] = []
+
+    def fake_pages(url, session=None):
+        urls.append(url)
+        yield {"features": [{}], "links": []}
+
+    monkeypatch.setattr(
+        "river_nav.collect.usgs_backfill_calls",
+        lambda end, days=BACKFILL_DAYS: planned,
+    )
+    monkeypatch.setattr("river_nav.collect.fetch_pages", fake_pages)
+
+    pulls = backfill_usgs(tmp_path, None, end, days=10)
+    assert [(p.monitoring_location_id, p.parameter_code) for p in pulls] == [
+        ("USGS-05587450", "00065"),
+        ("USGS-07010000", "00060"),
+    ]
+    assert len(urls) == 2
+    assert "USGS-05587450" in urls[0] and "00065" in urls[0]
+    assert "2026-10-05T00%3A00%3A00Z" in urls[0]
+    assert "USGS-07010000" in urls[1] and "00060" in urls[1]
+    assert "2026-10-12T00%3A00%3A00Z" in urls[1]
 
 
 def test_collect_usgs_lands_every_page(tmp_path, monkeypatch):
