@@ -186,5 +186,6 @@ def ceil_15(ts: datetime) -> datetime:
     return floored + timedelta(minutes=15)
 
 def interpolate_angle(start_deg: float, end_deg: float, fraction: float) -> float:
-    """Interpolate between two angles, wrapping around at 360°."""
-    raise NotImplementedError
+    """Shortest-arc blend, in degrees. Result is in [0, 360)."""
+    delta = (end_deg - start_deg + 180) % 360 - 180
+    return (start_deg + fraction * delta) % 360
