@@ -73,3 +73,14 @@ def test_duplicate_timestamps_use_the_last_value():
         Reading(_ts(10, 30), 10.0),
     ]
     _assert_matches(readings, [_ts(10, 15)])
+
+
+def test_right_neighbor_is_the_first_duplicate():
+    # 09:30 is halfway from 09:00=1 to the first 10:00=4, so the blend is 2.5.
+    # The later duplicate, 10:00=6, is not the right neighbor.
+    readings = [
+        Reading(_ts(9, 0), 1.0),
+        Reading(_ts(10, 0), 4.0),
+        Reading(_ts(10, 0), 6.0),
+    ]
+    _assert_matches(readings, [_ts(9, 30)])

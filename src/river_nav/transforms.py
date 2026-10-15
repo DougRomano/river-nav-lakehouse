@@ -194,7 +194,8 @@ def interpolate_frame(
     ordered = readings.copy()
     ordered["observed_at_utc"] = pd.to_datetime(ordered["observed_at_utc"], utc=True)
     # Stable sort keeps equal timestamps in input order. Backward as-of then
-    # takes the last duplicate, which is what bisect_right does.
+    # takes the last duplicate (bisect_right). Forward as-of takes the first
+    # row strictly later, ordered[i + 1], which is the first of the next timestamp.
     ordered = ordered.sort_values([by, "observed_at_utc"], kind="mergesort")
 
     left = pd.merge_asof(
