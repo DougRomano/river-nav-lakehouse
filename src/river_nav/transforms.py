@@ -80,7 +80,6 @@ def latest_per_key(readings: Iterable[GaugeReading]) -> list[GaugeReading]:
 
 OPEN_END = date(9999, 12, 31)
 
-
 @dataclass(frozen=True)
 class LockVersion:
     lock_id: str
@@ -135,3 +134,27 @@ def delay_minutes(arrived_at: datetime, started_lockage_at: datetime | None) -> 
     if minutes < 0:
         raise ValueError("lockage started before arrival")
     return round(minutes, 1)
+
+
+@dataclass(frozen=True)
+class Reading:
+    observed_at_utc: datetime
+    value: float | None
+
+def interpolate_at(
+    readings: list[Reading], grid: list[datetime]
+) -> list[tuple[datetime, float | None]]:
+    """Value at each grid time, linearly interpolated between the nearest readings."""
+    raise NotImplementedError
+
+def floor_15(ts: datetime) -> datetime:
+    """Floor to the nearest 15-minute mark."""
+    return ts.replace(second=0, microsecond=0, minute=ts.minute // 15 * 15)
+
+def ceil_15(ts: datetime) -> datetime:
+    """Ceil to the nearest 15-minute mark."""
+    return ts.replace(second=0, microsecond=0, minute=ts.minute // 15 * 15 + 15)
+
+def interpolate_angle(start_deg: float, end_deg: float, fraction: float) -> float:
+    """Interpolate between two angles, wrapping around at 360°."""
+    raise NotImplementedError
