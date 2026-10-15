@@ -97,7 +97,9 @@ def _fetch(start: datetime, end: datetime) -> tuple[list[GaugeReading], int]:
     return readings, skipped
 
 
-def _matches_pure(aligned: pd.DataFrame, by_gauge: dict[str, list[Reading]], grid: list[datetime]) -> bool:
+def _matches_pure(
+    aligned: pd.DataFrame, by_gauge: dict[str, list[Reading]], grid: list[datetime]
+) -> bool:
     for gauge_id, readings in by_gauge.items():
         got = aligned.loc[aligned["gauge_id"] == gauge_id]
         pure = interpolate_at(readings, grid)
@@ -159,8 +161,14 @@ def _report(
     sample_id = GAUGES[1].monitoring_location_id
     raw_times = {r.observed_at_utc for r in by_gauge[sample_id]}
     sample_t = next(t for t in grid if t not in raw_times)
-    left = max(r for r in by_gauge[sample_id] if r.observed_at_utc <= sample_t)
-    right = min(r for r in by_gauge[sample_id] if r.observed_at_utc > sample_t)
+    left = max(
+        (r for r in by_gauge[sample_id] if r.observed_at_utc <= sample_t),
+        key=lambda r: r.observed_at_utc,
+    )
+    right = min(
+        (r for r in by_gauge[sample_id] if r.observed_at_utc > sample_t),
+        key=lambda r: r.observed_at_utc,
+    )
     value = wide.loc[pd.Timestamp(sample_t), names[sample_id]]
     print(
         f"\n{names[sample_id]} {_stamp(sample_t)}: "

@@ -2,7 +2,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from river_nav.transforms import Reading, ceil_15, floor_15, interpolate_angle, interpolate_at
+from river_nav.transforms import (
+    Reading,
+    ceil_15,
+    fifteen_minute_grid,
+    floor_15,
+    interpolate_angle,
+    interpolate_at,
+)
 
 
 def _ts(hour: int, minute: int, second: int = 0) -> datetime:
@@ -63,6 +70,20 @@ def test_floor_15_drops_minutes_and_seconds():
 def test_ceil_15_keeps_an_exact_boundary():
     assert ceil_15(_ts(10, 7, 30)) == _ts(10, 15)
     assert ceil_15(_ts(10, 15)) == _ts(10, 15)
+
+
+def test_fifteen_minute_grid_spans_inclusive_marks():
+    assert fifteen_minute_grid(_ts(10, 7, 30), _ts(10, 46)) == [
+        _ts(10, 15),
+        _ts(10, 30),
+        _ts(10, 45),
+    ]
+    assert fifteen_minute_grid(_ts(10, 0), _ts(10, 30)) == [
+        _ts(10, 0),
+        _ts(10, 15),
+        _ts(10, 30),
+    ]
+    assert fifteen_minute_grid(_ts(10, 1), _ts(10, 14)) == []
 
 
 def test_interpolate_angle_takes_the_short_arc():

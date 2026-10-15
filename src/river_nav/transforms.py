@@ -244,6 +244,23 @@ def ceil_15(ts: datetime) -> datetime:
         return ts
     return floored + timedelta(minutes=15)
 
+def fifteen_minute_grid(start: datetime, end: datetime) -> list[datetime]:
+    """15-minute marks from ceil(start) through floor(end), inclusive.
+
+    A mark before start would be dropped for the gauge that begins latest.
+    A mark after end would sit past the gauge that ends earliest.
+    """
+    first = ceil_15(start)
+    last = floor_15(end)
+    if first > last:
+        return []
+    marks: list[datetime] = []
+    current = first
+    while current <= last:
+        marks.append(current)
+        current += timedelta(minutes=15)
+    return marks
+
 def interpolate_angle(start_deg: float, end_deg: float, fraction: float) -> float:
     """Shortest-arc blend, in degrees. Result is in [0, 360)."""
     delta = (end_deg - start_deg + 180) % 360 - 180
