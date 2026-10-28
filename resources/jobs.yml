@@ -5,8 +5,10 @@ resources:
       name: river_nav_collect_${bundle.target}
       description: Land raw USGS gauge readings and Corps Locks snapshots in the raw Volume
       schedule:
-        # Every 30 minutes, matching the Corps Locks refresh cadence
-        quartz_cron_expression: "0 0/30 * * * ?"
+        # Daily. Corps Locks traffic keeps ~30 days and USGS keeps years, so one run a day
+        # loses nothing, and serverless time is billed per run (a run is ~4 min, mostly the
+        # Corps Locks 5 requests/minute limit). Status and delay snapshots are daily too.
+        quartz_cron_expression: "0 7 6 * * ?"
         timezone_id: America/Chicago
         pause_status: ${var.collector_pause}
       max_concurrent_runs: 1
@@ -16,6 +18,8 @@ resources:
             notebook_path: ../src/notebooks/01_collect_snapshots.py
             base_parameters:
               raw_volume: ${var.raw_volume}
+              include_usace: ${var.include_usace}
+              lookback_hours: "30"   # daily run: 24 h plus the ~2.5 h USGS lag, with margin
           environment_key: default
           max_retries: 2
           min_retry_interval_millis: 120000
@@ -30,7 +34,8 @@ resources:
       name: river_nav_refresh_${bundle.target}
       description: Refresh bronze → silver → gold after collection
       schedule:
-        quartz_cron_expression: "0 15 * * * ?"
+        # 30 minutes after the collector
+        quartz_cron_expression: "0 37 6 * * ?"
         timezone_id: America/Chicago
         pause_status: ${var.collector_pause}
       tasks:

@@ -19,13 +19,17 @@ variables:
   collector_pause:
     description: PAUSED or UNPAUSED for the collector schedule
     default: PAUSED
+  include_usace:
+    description: Collect Corps Locks and Waterway Locks in the job. "false" on a workspace that cannot reach USACE/BTS (Free Edition); then use scripts/upload_raw.sh
+    default: "true"
 
 targets:
   dev:
+    # Doug's own Azure subscription. 00_check_egress (2026-10-28): all sources reachable.
     mode: development
     default: true
     workspace:
-      host: https://adb-REPLACE_ME.azuredatabricks.net
+      host: https://adb-7405616698817750.10.azuredatabricks.net   # your workspace URL, up to .net
 
   test:
     workspace:

@@ -12,13 +12,18 @@ All sources are U.S. government public data. Nothing proprietary or client-owned
 
 ## Where each source is collected
 
-Databricks Free Edition serverless reaches only a list of trusted domains. `src/notebooks/00_check_egress.py`, run 2026-10-28:
+`src/notebooks/00_check_egress.py` tests DNS, TCP, TLS and HTTP for every host.
 
-| Source | From Free Edition | Collected by |
+| Source | Azure Databricks (own subscription), 2026-10-28 | Collected by |
 | --- | --- | --- |
-| USGS Water Data API | OK | Databricks job (`collect_snapshots`) |
-| USACE Corps Locks | BLOCKED (ConnectionError) | Mac `launchd` → `scripts/collect_local.py`, then `scripts/upload_raw.sh` |
-| BTS Waterway Locks | BLOCKED (ConnectionError) | Mac, `scripts/collect_locks.py` when the layer changes, then `scripts/upload_raw.sh` |
+| USGS Water Data API | OK | Databricks job `collect_snapshots`, daily |
+| USACE Corps Locks (`ndc.ops.usace.army.mil`) | OK | Databricks job, daily |
+| BTS Waterway Locks (`services7.arcgis.com`) | OK | Databricks job, daily |
+
+An earlier run in Databricks Free Edition failed for USACE and BTS with `ConnectionError`
+(Free Edition allows only a list of trusted domains). For that case, set
+`include_usace: "false"` and keep the Mac collector plus `scripts/upload_raw.sh`.
+`corpslocks.usace.army.mil` does not resolve anywhere; the data lives on `ndc.ops`.
 
 ## Known data quirks (keep adding as you find them)
 

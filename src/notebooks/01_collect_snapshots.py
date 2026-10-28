@@ -10,10 +10,10 @@
 
 dbutils.widgets.text("raw_volume", "/Volumes/river_nav_dev/nav_raw/landing")
 dbutils.widgets.text("lookback_hours", "6")  # USGS lags ~2.5 h; overlap is deduped in silver
-# Free Edition serverless cannot reach the USACE or BTS hosts (00_check_egress, 2026-10-28:
-# ConnectionError). Those files are collected on the Mac and uploaded with
-# scripts/upload_raw.sh. Set to "true" on a workspace that can reach them.
-dbutils.widgets.dropdown("include_usace", "false", ["true", "false"])
+# The Azure workspace reaches every source (00_check_egress, 2026-10-28). On a workspace
+# that cannot reach USACE or BTS (Free Edition), the job passes "false" and the Mac
+# collects those files instead (scripts/collect_local.py, then scripts/upload_raw.sh).
+dbutils.widgets.dropdown("include_usace", "true", ["true", "false"])
 
 raw_volume = dbutils.widgets.get("raw_volume")
 lookback_hours = int(dbutils.widgets.get("lookback_hours"))
@@ -73,4 +73,4 @@ if include_usace:
     path = collect_waterway_locks(raw_volume, session, run_at)
     print(f"Waterway Locks: landed {path.name}")
 else:
-    print("Corps Locks and Waterway Locks: skipped (include_usace=false); uploaded from the Mac")
+    print("Corps Locks and Waterway Locks: skipped (include_usace=false)")
