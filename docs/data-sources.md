@@ -10,6 +10,16 @@ All sources are U.S. government public data. Nothing proprietary or client-owned
 | NOAA Climate Data Online | NOAA NCEI | Daily precipitation and temperature (ML features) | Daily | TODO week 18 |
 | Navigation notices, river forecasts | USACE districts, NWS | Unstructured text for Foundry RAG | As published | TODO week 16 |
 
+## Where each source is collected
+
+Databricks Free Edition serverless reaches only a list of trusted domains. `src/notebooks/00_check_egress.py`, run 2026-10-28:
+
+| Source | From Free Edition | Collected by |
+| --- | --- | --- |
+| USGS Water Data API | OK | Databricks job (`collect_snapshots`) |
+| USACE Corps Locks | BLOCKED (ConnectionError) | Mac `launchd` → `scripts/collect_local.py`, then `scripts/upload_raw.sh` |
+| BTS Waterway Locks | BLOCKED (ConnectionError) | Mac, `scripts/collect_locks.py` when the layer changes, then `scripts/upload_raw.sh` |
+
 ## Known data quirks (keep adding as you find them)
 
 - USGS no-data sentinel `-999999` → null in silver.
