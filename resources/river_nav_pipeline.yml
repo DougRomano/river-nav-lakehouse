@@ -18,6 +18,7 @@ resources:
         - file:
             path: ../src/pipelines/gold.py
       configuration:
+        spark.sql.session.timeZone: UTC   # lockage_id and every timestamp render in UTC
         river_nav.raw_volume: ${var.raw_volume}
         river_nav.catalog: ${var.catalog}
         river_nav.schema_prefix: ${var.schema_prefix}

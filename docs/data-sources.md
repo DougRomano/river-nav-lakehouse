@@ -10,6 +10,21 @@ All sources are U.S. government public data. Nothing proprietary or client-owned
 | NOAA Climate Data Online | NOAA NCEI | Daily precipitation and temperature (ML features) | Daily | TODO week 18 |
 | Navigation notices, river forecasts | USACE districts, NWS | Unstructured text for Foundry RAG | As published | TODO week 16 |
 
+## Where each source is collected
+
+`src/notebooks/00_check_egress.py` tests DNS, TCP, TLS and HTTP for every host.
+
+| Source | Azure Databricks (own subscription), 2026-10-28 | Collected by |
+| --- | --- | --- |
+| USGS Water Data API | OK | Databricks job `collect_snapshots`, daily |
+| USACE Corps Locks (`ndc.ops.usace.army.mil`) | OK | Databricks job, daily |
+| BTS Waterway Locks (`services7.arcgis.com`) | OK | Databricks job, daily |
+
+An earlier run in Databricks Free Edition failed for USACE and BTS with `ConnectionError`
+(Free Edition allows only a list of trusted domains). For that case, set
+`include_usace: "false"` and keep the Mac collector plus `scripts/upload_raw.sh`.
+`corpslocks.usace.army.mil` does not resolve anywhere; the data lives on `ndc.ops`.
+
 ## Known data quirks (keep adding as you find them)
 
 - USGS no-data sentinel `-999999` → null in silver.
@@ -21,7 +36,10 @@ All sources are U.S. government public data. Nothing proprietary or client-owned
 - Observed 2026-10-13: the newest reading was ~2.5 hours behind wall-clock time. Size the collector's lookback window for that lag.
 - Corps Locks: a rate-limit breach returns **HTTP 200** with `{"error": "Rate limit exceeded..."}`. `corps_locks_client.polite_get` throttles to one call per 13 s and checks the body.
 - Corps Locks: JSON is served as `text/html`, and `lock_delay_json` is not always valid JSON (`"N/A,"` is missing a quote). Land bodies as-is; parse in bronze/silver.
-- Corps Locks: dates are `MM/DD/YY HH:MM` with `"timezone": "CST"` even during daylight time. VERIFY whether the clock is CST or local (CDT) before converting to UTC.
+- Corps Locks: dates are `MM/DD/YY HH:MM` labeled `"timezone": "CST"` year-round, but the clock is **local Central time** (America/Chicago). Checked 2026-10-28 on 65,880 landed timestamps: read as fixed CST, 22 fall after the moment the file was pulled; read as America/Chicago, none do. `parse_lpms_time` converts to UTC.
+- Corps Locks traffic: one vessel arrival can have **several rows** (a long tow locks through in cuts). Lock + vessel + arrival is not unique; adding start of lockage is, within one pull.
+- Corps Locks traffic: the 30-day window is **revised** between pulls. On 2026-10-28, 48 of ~1,650 overlapping arrivals had a changed start, end or `numberProcessed`, and the number of cuts can change. Silver keeps the newest pull per vessel arrival (`latest_snapshot_lockages`).
+- Corps Locks traffic: `numBarges`, `hazardCode` and `numberProcessed` are often null (237, 237 and 340 of 2,146 rows on 2026-10-28). A tow still waiting has `solDate` = `""`.
 - Corps Locks: queue rows carry `MMSI` (often null) — the same vessel ID AIS uses.
 - First pull 2026-10-14: 1,843 lockages at the 6 target locks, 2026-09-14 to 2026-10-13. Median wait (arrival → start of lockage): Peoria 0 min, LaGrange 7, L&D 24 86, L&D 25 137, Mel Price 25, Chain of Rocks 63.
 - Waterway Locks: one row per lock **chamber** (`CHAMBN` = MAIN / AUXILLARY [sic] / MAIN1 / CNTRL), key `NDCCODE`. `RIVERCD`+`LOCKCD` identifies the lock.

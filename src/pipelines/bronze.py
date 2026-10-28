@@ -52,4 +52,36 @@ def bronze_lock_characteristics():
         )
     )
 
-# TODO (week 7): add bronze_corps_locks_* tables once the source format is known.
+# Pull time from the landed file name, e.g. corps_locks_traffic_MI26_20261028T110705Z.json.
+# This, not the upload or ingest time, orders revisions in silver.
+_PULL_STAMP = r"_(\d{8}T\d{6}Z)\.json$"
+
+
+@dp.table(
+    name="bronze_corps_locks_traffic",
+    comment="USACE Corps Locks traffic_report rows, one per array element, strings as received",
+    table_properties={"quality": "bronze"},
+)
+def bronze_corps_locks_traffic():
+    path = F.col("_metadata.file_path")
+    return (
+        spark.readStream.format("cloudFiles")  # noqa: F821
+        .option("cloudFiles.format", "json")
+        .option("multiLine", "true")  # each file is one JSON array
+        .option("cloudFiles.inferColumnTypes", "false")  # keep strings in bronze
+        .option("cloudFiles.schemaEvolutionMode", "rescue")
+        # One root plus a file-name filter. A glob over six lock folders that each hold
+        # ingest_date=... folders makes Spark's partition discovery fail. VERIFY on the
+        # first run that the empty partitionColumns turns partition inference off.
+        .option("cloudFiles.partitionColumns", "")
+        .option("pathGlobFilter", "corps_locks_traffic_*.json")
+        .load(f"{RAW}/")
+        .select(
+            "*",
+            path.alias("_source_file"),
+            F.try_to_timestamp(
+                F.regexp_extract(path, _PULL_STAMP, 1), F.lit("yyyyMMdd'T'HHmmss'Z'")
+            ).alias("_pulled_at"),
+            F.current_timestamp().alias("_ingested_at"),
+        )
+    )

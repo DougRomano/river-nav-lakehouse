@@ -1,6 +1,6 @@
 """Static configuration: which gauges, locks and parameters this project tracks.
 
-USGS gauge IDs verified 2026-10-13. VERIFY in the week-2 spike: the Corps Locks source.
+USGS gauge IDs verified 2026-10-13. Corps Locks Data Web Services verified 2026-10-14.
 Values marked VERIFY are best-known starting points, not confirmed endpoints.
 """
 

@@ -10,9 +10,14 @@
 
 dbutils.widgets.text("raw_volume", "/Volumes/river_nav_dev/nav_raw/landing")
 dbutils.widgets.text("lookback_hours", "6")  # USGS lags ~2.5 h; overlap is deduped in silver
+# The Azure workspace reaches every source (00_check_egress, 2026-10-28). On a workspace
+# that cannot reach USACE or BTS (Free Edition), the job passes "false" and the Mac
+# collects those files instead (scripts/collect_local.py, then scripts/upload_raw.sh).
+dbutils.widgets.dropdown("include_usace", "true", ["true", "false"])
 
 raw_volume = dbutils.widgets.get("raw_volume")
 lookback_hours = int(dbutils.widgets.get("lookback_hours"))
+include_usace = dbutils.widgets.get("include_usace") == "true"
 
 # COMMAND ----------
 
@@ -51,7 +56,7 @@ print(f"USGS: landed {sum(pull.pages for pull in pulls)} pages")
 
 # COMMAND ----------
 
-for name, url in corps_locks_sources(run_at.date()):
+for name, url in corps_locks_sources(run_at.date()) if include_usace else []:
     body = polite_get(session, url)  # 5 requests/min limit; ~4 min per run
     land(raw_volume, f"corps_locks_{name}", body, run_at)
     print(f"Corps Locks: landed {name} ({len(body):,} bytes)")
@@ -64,5 +69,8 @@ for name, url in corps_locks_sources(run_at.date()):
 
 # COMMAND ----------
 
-path = collect_waterway_locks(raw_volume, session, run_at)
-print(f"Waterway Locks: landed {path.name}")
+if include_usace:
+    path = collect_waterway_locks(raw_volume, session, run_at)
+    print(f"Waterway Locks: landed {path.name}")
+else:
+    print("Corps Locks and Waterway Locks: skipped (include_usace=false)")
