@@ -10,6 +10,7 @@ from bisect import bisect_right
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -323,3 +324,114 @@ def interpolate_angle(start_deg: float, end_deg: float, fraction: float) -> floa
     """Shortest-arc blend, in degrees. Result is in [0, 360)."""
     delta = (end_deg - start_deg + 180) % 360 - 180
     return (start_deg + fraction * delta) % 360
+
+
+# ---------------------------------------------------------------------------
+# Corps Locks lockages (USACE NDC traffic_report)
+# ---------------------------------------------------------------------------
+
+# The feed labels every time "CST", but the clock is local Central time.
+# Checked 2026-10-28 on 65,880 landed timestamps: read as fixed CST, 22 of them
+# fall after the moment the file was pulled. Read as America/Chicago, none do.
+LPMS_TIME_ZONE = ZoneInfo("America/Chicago")
+LPMS_TIME_FORMAT = "%m/%d/%y %H:%M"
+
+
+def parse_lpms_time(text: str | None) -> datetime | None:
+    """Parse an LPMS time like "10/05/26 12:06" (local Central) and return UTC.
+
+    Blank or missing values become None. In the repeated hour when daylight
+    time ends, the first occurrence (daylight time) is used, because the feed
+    gives no way to tell the two apart.
+    """
+    if text is None or not text.strip():
+        return None
+    local = datetime.strptime(text.strip(), LPMS_TIME_FORMAT).replace(tzinfo=LPMS_TIME_ZONE)
+    return local.astimezone(UTC)
+
+
+@dataclass(frozen=True)
+class Lockage:
+    river_code: str
+    lock_no: str
+    vessel_no: str
+    vessel_name: str | None
+    direction: str
+    arrival_utc: datetime
+    start_utc: datetime | None
+    end_utc: datetime | None
+    num_barges: int | None
+    number_processed: int | None
+    is_hazardous: bool | None
+    ingested_at: datetime
+    cut_seq: int = 0
+
+    @property
+    def lock_code(self) -> str:
+        """Same key as silver_lock_history.lock_code, for example "MI-26"."""
+        return f"{self.river_code}-{self.lock_no}"
+
+    @property
+    def lockage_id(self) -> str:
+        """One lockage: lock, vessel, arrival and cut. Stable across pulls."""
+        return f"{self.lock_code}|{self.vessel_no}|{self.arrival_utc:%Y%m%dT%H%MZ}|{self.cut_seq}"
+
+
+def _optional_int(value: object) -> int | None:
+    return None if value in (None, "") else int(value)
+
+
+def parse_lockage_record(record: dict, ingested_at: datetime) -> Lockage:
+    """Turn one traffic_report object into a typed Lockage.
+
+    Raises ValueError when the record has no arrival time; that row cannot be
+    placed in time and is dropped by the silver expectation.
+    """
+    arrival = parse_lpms_time(record.get("arrivalDate"))
+    if arrival is None:
+        raise ValueError("lockage has no arrivalDate")
+    hazard = (record.get("hazardCode") or "").strip().upper()
+    return Lockage(
+        river_code=record["riverCode"].strip(),
+        lock_no=record["lockNo"].strip(),
+        vessel_no=record["vesselNo"].strip(),
+        vessel_name=(record.get("vesselName") or "").strip() or None,
+        direction=record["direction"].strip(),
+        arrival_utc=arrival,
+        start_utc=parse_lpms_time(record.get("solDate")),
+        end_utc=parse_lpms_time(record.get("endOfLockage")),
+        num_barges=_optional_int(record.get("numBarges")),
+        number_processed=_optional_int(record.get("numberProcessed")),
+        is_hazardous={"Y": True, "N": False}.get(hazard),
+        ingested_at=ingested_at,
+    )
+
+
+def latest_snapshot_lockages(lockages: Iterable[Lockage]) -> list[Lockage]:
+    """Keep the newest version of each vessel arrival, then number its cuts.
+
+    The feed is a rolling 30-day window, pulled daily, so one arrival appears
+    in many pulls. A later pull can revise start and end times or the barge
+    count. One arrival can also have several rows: a long tow locks through in
+    cuts. Neither the start time nor the cut count is stable across pulls, so
+    the rule works on the whole arrival:
+
+    - Group by lock, vessel and arrival time.
+    - Keep only the rows from the newest pull that contains that arrival.
+    - Number those rows 1..n by start time (rows with no start sort last).
+
+    An arrival that has rolled out of the newest pull keeps its last version.
+    Mirrors silver_lockages in the pipeline.
+    """
+    groups: dict[tuple[str, str, datetime], list[Lockage]] = {}
+    for row in lockages:
+        groups.setdefault((row.lock_code, row.vessel_no, row.arrival_utc), []).append(row)
+
+    result: list[Lockage] = []
+    for rows in groups.values():
+        newest = max(r.ingested_at for r in rows)
+        latest = [r for r in rows if r.ingested_at == newest]
+        latest.sort(key=lambda r: (r.start_utc is None, r.start_utc or r.arrival_utc))
+        result.extend(replace(r, cut_seq=i) for i, r in enumerate(latest, start=1))
+    return sorted(result, key=lambda r: (r.lock_code, r.arrival_utc, r.vessel_no, r.cut_seq))
+
